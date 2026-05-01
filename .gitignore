@@ -1,0 +1,44 @@
+# Build output
+build/bin/
+build/darwin/
+frontend/dist/
+frontend/node_modules/
+frontend/wailsjs/
+node_modules/
+
+# Generated TypeScript build artefacts
+frontend/tsconfig*.tsbuildinfo
+frontend/vite.config.d.ts
+frontend/vite.config.js
+frontend/package.json.md5
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# Runtime artefacts
+*.db
+*.db-journal
+*.log
+logs/
+
+# Prism user data (must never be committed)
+prism.yaml
+
+# Cloudflared binaries (fetched at build time via scripts/fetch_cloudflared.sh)
+# Large platform binaries — keep the .keep placeholders and VERSION pinned.
+resources/cloudflared/**/cloudflared
+resources/cloudflared/**/cloudflared.exe
+
+# CGO / Go tooling caches (defensive)
+*.o
+*.a
+
+# Local environment
+.env
+.env.local
