@@ -6,6 +6,9 @@ frontend/node_modules/
 frontend/wailsjs/
 node_modules/
 
+# Release artefacts
+dist/
+
 # Generated TypeScript build artefacts
 frontend/tsconfig*.tsbuildinfo
 frontend/vite.config.d.ts
