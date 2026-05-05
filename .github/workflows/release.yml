@@ -182,7 +182,10 @@ jobs:
           if command -v shasum >/dev/null 2>&1; then
             shasum -a 256 Prism-* > "SHA256SUMS-${{ matrix.name }}.txt"
           elif command -v sha256sum >/dev/null 2>&1; then
-            sha256sum Prism-* > "SHA256SUMS-${{ matrix.name }}.txt"
+            # --text forces "<hash>  <file>" output (two spaces, no `*` marker)
+            # matching shasum's default, so all per-platform sums files share
+            # one format and the aggregator's `sort -k2` orders them uniformly.
+            sha256sum --text Prism-* > "SHA256SUMS-${{ matrix.name }}.txt"
           else
             echo "neither shasum nor sha256sum is available on this runner" >&2
             exit 1
