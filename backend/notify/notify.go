@@ -78,12 +78,23 @@ func runWithStdin(text, name string, args ...string) bool {
 	return cmd.Run() == nil
 }
 
+// applescriptEscape escapes a string so it can be safely embedded
+// inside an AppleScript double-quoted literal. AppleScript treats
+// backslash as the escape character (\n, \t, \r, \\, \") inside
+// double-quoted strings, so backslashes MUST be escaped first —
+// otherwise a later "\"" we write to escape a real quote would be
+// mangled by an earlier replacement of "\" → "\\". A literal
+// backslash followed by 'n' in user input would also otherwise
+// render as a newline in the notification.
+func applescriptEscape(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+	return s
+}
+
 func showDarwin(title, body string) bool {
-	// Escape embedded double-quotes so the AppleScript literal stays
-	// well-formed. Single quotes need no escaping inside a -e arg.
-	safeTitle := strings.ReplaceAll(title, `"`, `\"`)
-	safeBody := strings.ReplaceAll(body, `"`, `\"`)
-	script := `display notification "` + safeBody + `" with title "` + safeTitle + `"`
+	script := `display notification "` + applescriptEscape(body) +
+		`" with title "` + applescriptEscape(title) + `"`
 	return exec.Command("osascript", "-e", script).Run() == nil
 }
 
