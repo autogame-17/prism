@@ -157,7 +157,7 @@ jobs:
       # ---- Linux ----
       - name: Build (linux/amd64)
         if: steps.gate.outputs.skip != 'true' && runner.os == 'Linux'
-        run: wails build -platform linux/amd64 -clean
+        run: wails build -platform linux/amd64 -tags webkit2_41 -clean
 
       - name: Package Linux tarball
         if: steps.gate.outputs.skip != 'true' && runner.os == 'Linux'

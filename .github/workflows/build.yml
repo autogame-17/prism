@@ -58,7 +58,16 @@ jobs:
         run: pnpm install --frozen-lockfile=false
 
       - name: Build (${{ matrix.platform }})
-        run: wails build -platform ${{ matrix.platform }} -clean
+        shell: bash
+        run: |
+          # On Linux runners we need the webkit2_41 build tag because Ubuntu
+          # 22.04+ ships libwebkit2gtk-4.1 instead of 4.0; Wails picks the
+          # right pkg-config target via this tag.
+          if [[ "${{ runner.os }}" == "Linux" ]]; then
+            wails build -platform "${{ matrix.platform }}" -tags webkit2_41 -clean
+          else
+            wails build -platform "${{ matrix.platform }}" -clean
+          fi
 
       - name: Upload build artefacts (CI only)
         uses: actions/upload-artifact@v4
