@@ -1,0 +1,33 @@
+{
+  "$schema": "./public.manifest.schema.json",
+  "version": 1,
+  "outDir": "dist-public",
+  "publicRepo": "autogame-17/prism",
+  "publicBranch": "main",
+  "comment": "Default include = every git-tracked file. The exclude list below is the only thing you maintain. New code will auto-flow to the public mirror unless added to exclude.",
+  "exclude": [
+    "AGENTS.md",
+    "public.manifest.json",
+    "scripts/build_public.sh",
+    "scripts/publish_public.sh",
+    ".github/workflows/build.yml",
+    ".public-only/**",
+    "docs/internal/**",
+    "*.draft.md"
+  ],
+  "rename": {
+    "README.public.md": "README.md"
+  },
+  "rewrite": {
+    ".gitignore": [
+      {
+        "from": "# Release artefacts\ndist/",
+        "to": "# Release artefacts\ndist/\ndist-public/"
+      }
+    ]
+  },
+  "publicAdditions": {
+    "comment": "Files that exist only in the public mirror, not in the private repo. Sourced from .public-only/.",
+    "sourceDir": ".public-only"
+  }
+}

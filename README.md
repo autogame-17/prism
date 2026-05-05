@@ -126,4 +126,8 @@ prism-desktop/
 
 ## License
 
-Prism 内嵌了 one-hub（GPL-3.0），本仓库继承同一许可证。
+Prism 采用 **AGPL-3.0-or-later** 许可证。
+
+为什么是 AGPL：Prism 是一个网络服务（暴露 OpenAI 兼容 API 给 Cursor/Cline 等客户端调用），AGPL-3.0 是为这种"网络可见"的形态而生的——任何在网络上提供服务的修改版本必须把对应源码同样开放给最终用户。这条款也是内嵌的 [one-hub](https://github.com/MartialBE/one-api)（GPL-3.0）允许下游在采用更严格 copyleft 的前提下重新发布的合理选择。
+
+完整许可证文本见仓库根目录的 [`LICENSE`](./LICENSE)。
