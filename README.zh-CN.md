@@ -4,7 +4,7 @@
 
 English version: [README.md](./README.md).
 
-![Prism Dashboard](./docs/screenshots/hero-v2.png)
+![Prism Dashboard](./docs/screenshots/hero-v3.png)
 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Releases](https://img.shields.io/github/v/release/autogame-17/prism)](https://github.com/autogame-17/prism/releases)
