@@ -556,12 +556,11 @@ func writeNestedStringFieldToYAML(path, parent, child, value string) error {
 	scanner := bufio.NewScanner(bytes.NewReader(body))
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 	var (
-		out             bytes.Buffer
-		inParent        bool
-		parentExists    bool
-		replacedChild   bool
-		detectedIndent  string // indentation seen on existing siblings
-		justLeftParent  bool   // marker so we can append the child before exiting
+		out            bytes.Buffer
+		inParent       bool
+		parentExists   bool
+		replacedChild  bool
+		detectedIndent string // indentation seen on existing siblings
 	)
 	defaultIndent := "  "
 
@@ -588,7 +587,6 @@ func writeNestedStringFieldToYAML(path, parent, child, value string) error {
 			// before the new top-level block begins.
 			if inParent {
 				flushChildBeforeLeavingParent()
-				justLeftParent = true
 			}
 			inParent = strings.HasPrefix(trimmed, parentPrefix)
 			if inParent {
@@ -597,7 +595,6 @@ func writeNestedStringFieldToYAML(path, parent, child, value string) error {
 			}
 			out.WriteString(line)
 			out.WriteByte('\n')
-			_ = justLeftParent
 			continue
 		}
 		// Non-top-level: capture indentation if we're tracking siblings,
