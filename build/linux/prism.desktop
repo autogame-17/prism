@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Prism
+Comment=Cross-platform LLM gateway with Cloudflare tunnel
+Exec=Prism %U
+Icon=prism
+Type=Application
+Terminal=false
+Categories=Utility;Development;Network;
+StartupWMClass=Prism

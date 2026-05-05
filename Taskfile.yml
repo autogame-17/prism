@@ -1,0 +1,77 @@
+version: '3'
+
+vars:
+  VERSION:
+    sh: grep -E '^const appVersion' main.go | sed 's/.*"\(.*\)".*/\1/' || echo "dev"
+  BIN_DIR: build/bin
+  DIST_DIR: build/dist
+
+tasks:
+  dev:
+    desc: Run Prism in Wails dev mode with hot-reloading frontend.
+    cmds:
+      - wails dev
+
+  build:darwin:
+    desc: Build Prism.app for macOS universal and produce a dmg.
+    cmds:
+      - wails build -platform darwin/universal -clean
+      - mkdir -p {{.DIST_DIR}}
+      - codesign --force --deep --sign - {{.BIN_DIR}}/Prism.app || true
+      - |
+        if command -v create-dmg >/dev/null 2>&1; then
+          create-dmg --volname "Prism {{.VERSION}}" \
+            --window-size 540 380 \
+            --icon-size 96 \
+            --app-drop-link 380 180 \
+            {{.DIST_DIR}}/Prism-{{.VERSION}}-darwin-universal.dmg \
+            {{.BIN_DIR}}/Prism.app
+        else
+          hdiutil create -volname "Prism {{.VERSION}}" -srcfolder {{.BIN_DIR}}/Prism.app -ov -format UDZO {{.DIST_DIR}}/Prism-{{.VERSION}}-darwin-universal.dmg
+        fi
+
+  build:darwin:arm64:
+    desc: Build Prism.app for macOS arm64 only (faster iteration).
+    cmds:
+      - wails build -platform darwin/arm64 -clean
+
+  build:windows:
+    desc: Build Prism.exe for Windows amd64 with NSIS installer.
+    cmds:
+      - wails build -platform windows/amd64 -clean -nsis
+      - mkdir -p {{.DIST_DIR}}
+      - |
+        if [ -f {{.BIN_DIR}}/Prism-amd64-installer.exe ]; then
+          cp {{.BIN_DIR}}/Prism-amd64-installer.exe {{.DIST_DIR}}/Prism-{{.VERSION}}-windows-amd64-setup.exe
+        fi
+
+  build:linux:
+    desc: Build Prism for Linux amd64 and bundle an AppImage when appimagetool is available.
+    cmds:
+      - wails build -platform linux/amd64 -clean
+      - ./scripts/build_appimage.sh {{.VERSION}} amd64
+
+  build:linux:arm64:
+    desc: Build Prism for Linux arm64.
+    cmds:
+      - wails build -platform linux/arm64 -clean
+      - ./scripts/build_appimage.sh {{.VERSION}} arm64
+
+  build:all:
+    desc: Build every supported platform (local machine must have cross toolchains).
+    deps: [build:darwin, build:windows, build:linux]
+
+  fetch:cloudflared:
+    desc: Download cloudflared binaries for every supported platform.
+    cmds:
+      - ./scripts/fetch_cloudflared.sh
+
+  sync:upstream:
+    desc: Pull upstream one-hub changes into backend/core and re-apply Prism patches.
+    cmds:
+      - ./scripts/sync_upstream.sh
+
+  clean:
+    desc: Remove build artifacts.
+    cmds:
+      - rm -rf {{.BIN_DIR}} {{.DIST_DIR}} frontend/dist frontend/wailsjs
