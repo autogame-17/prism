@@ -453,10 +453,7 @@ export function settingsPaths(): Promise<PrismPaths | null> {
 }
 
 export async function settingsOpenDataDir(): Promise<void> {
-  await safe(async () => {
-    await SettingsAPIRaw.OpenDataDir()
-    return undefined
-  }, undefined)
+  await strict(() => SettingsAPIRaw.OpenDataDir())
 }
 
 export function settingsExport(): Promise<unknown> {
@@ -469,4 +466,34 @@ export async function settingsExportToFile(path: string): Promise<void> {
 
 export async function settingsImportFromFile(path: string, replace: boolean): Promise<void> {
   await strict(() => SettingsAPIRaw.ImportFromFile(path, replace))
+}
+
+export type ListenAddrInfo = {
+  configured: string
+  actual: string
+  default: string
+}
+
+export function settingsGetListenAddr(): Promise<ListenAddrInfo | null> {
+  return safe(async () => (await SettingsAPIRaw.GetListenAddr()) as unknown as ListenAddrInfo, null)
+}
+
+export async function settingsSetListenAddr(addr: string): Promise<void> {
+  await strict(() => SettingsAPIRaw.SetListenAddr(addr))
+}
+
+export type CloudflareTunnelInfo = {
+  hasToken: boolean
+  hostname: string
+}
+
+export function settingsGetCloudflareTunnel(): Promise<CloudflareTunnelInfo | null> {
+  return safe(
+    async () => (await SettingsAPIRaw.GetCloudflareTunnel()) as unknown as CloudflareTunnelInfo,
+    null,
+  )
+}
+
+export async function settingsSetCloudflareTunnel(token: string, hostname: string): Promise<void> {
+  await strict(() => SettingsAPIRaw.SetCloudflareTunnel(token, hostname))
 }

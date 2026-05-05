@@ -152,6 +152,9 @@ const en: Dict = {
   'tunnel.copy': 'Copy public URL',
   'tunnel.urlCopied': 'Public URL copied',
   'tunnel.copyFailed': 'Copy failed',
+  'tunnel.urlChanged': 'Tunnel URL changed',
+  'tunnel.urlChangedCopiedDesc': 'New base URL copied to clipboard.',
+  'tunnel.urlChangedDesc': 'Update your client to use the new URL.',
   'tunnel.logsTitle': 'cloudflared logs',
   'tunnel.logsDesc': 'Live stderr/stdout feed',
   'tunnel.logTitle': 'Process log',
@@ -213,6 +216,7 @@ const en: Dict = {
   'settings.configFile': 'Config file',
   'settings.open': 'Open',
   'settings.openDataDir': 'Open in file manager',
+  'settings.openFailed': 'Open failed',
   'settings.export': 'Export...',
   'settings.exportTitle': 'Export Prism data',
   'settings.importTitle': 'Import Prism data',
@@ -232,6 +236,40 @@ const en: Dict = {
   'settings.about.localHttp': 'Local HTTP',
   'settings.about.platform': 'Platform',
   'settings.about.coreFork': 'Core fork: MartialBE/one-api',
+
+  'settings.listen.title': 'Local server',
+  'settings.listen.address': 'Listen address',
+  'settings.listen.hint':
+    'host:port the embedded HTTP server binds to. Keep the port stable so external clients (e.g. Cursor via Cloudflare tunnel) hold the same URL across restarts.',
+  'settings.listen.actual': 'Currently bound',
+  'settings.listen.save': 'Save',
+  'settings.listen.saved': 'Saved. Restart Prism to take effect.',
+  'settings.listen.saveFailed': 'Save failed',
+  'settings.listen.copyBaseUrl': 'Copy base URL',
+  'settings.listen.copied': 'Copied',
+  'settings.listen.copyFailed': 'Copy failed',
+  'settings.listen.mismatch':
+    'Configured address differs from the running one (port likely was busy at startup). Restart Prism to retry.',
+
+  'settings.tunnel.title': 'Cloudflare named tunnel (stable URL)',
+  'settings.tunnel.hint':
+    'Trycloudflare gives a fresh random URL on every restart. Switch to a named tunnel to keep one stable hostname forever — requires a Cloudflare account, a domain, and a tunnel token from the Zero Trust dashboard.',
+  'settings.tunnel.hostname': 'Public hostname',
+  'settings.tunnel.hostnameHint':
+    'Bare host, no scheme. Must match the public hostname you assigned to the tunnel in Cloudflare.',
+  'settings.tunnel.token': 'Tunnel token',
+  'settings.tunnel.tokenPlaceholder': 'Paste the long token from cloudflared',
+  'settings.tunnel.tokenPlaceholderConfigured':
+    'Token already configured — type a new one to rotate',
+  'settings.tunnel.tokenHint':
+    'Token is stored in prism.yaml and never echoed back to this UI in cleartext.',
+  'settings.tunnel.save': 'Save',
+  'settings.tunnel.saved': 'Saved. Restart Prism to take effect.',
+  'settings.tunnel.cleared': 'Cleared. Restart Prism to take effect.',
+  'settings.tunnel.saveFailed': 'Save failed',
+  'settings.tunnel.clear': 'Disable named tunnel',
+  'settings.tunnel.statusConfigured': 'Named tunnel configured',
+  'settings.tunnel.statusOff': 'Using trycloudflare (random URL)',
 
   'onboarding.title': 'Welcome to Prism',
   'onboarding.intro':
@@ -399,6 +437,9 @@ const zh: Dict = {
   'tunnel.copy': '复制公网 URL',
   'tunnel.urlCopied': '公网 URL 已复制',
   'tunnel.copyFailed': '复制失败',
+  'tunnel.urlChanged': '隧道 URL 已变更',
+  'tunnel.urlChangedCopiedDesc': '新的 Base URL 已复制到剪贴板。',
+  'tunnel.urlChangedDesc': '请更新客户端使用新的 URL。',
   'tunnel.logsTitle': 'cloudflared 日志',
   'tunnel.logsDesc': '实时 stderr / stdout',
   'tunnel.logTitle': '进程日志',
@@ -460,6 +501,7 @@ const zh: Dict = {
   'settings.configFile': '配置文件',
   'settings.open': '打开',
   'settings.openDataDir': '在文件管理器中打开',
+  'settings.openFailed': '打开失败',
   'settings.export': '导出...',
   'settings.exportTitle': '导出 Prism 数据',
   'settings.importTitle': '导入 Prism 数据',
@@ -479,6 +521,36 @@ const zh: Dict = {
   'settings.about.localHttp': '本地 HTTP',
   'settings.about.platform': '平台',
   'settings.about.coreFork': '内核 Fork：MartialBE/one-api',
+
+  'settings.listen.title': '本地服务',
+  'settings.listen.address': '监听地址',
+  'settings.listen.hint':
+    '内置 HTTP 服务的 host:port。固定端口可以让外部客户端（例如通过 Cloudflare 隧道接入的 Cursor）跨重启稳定使用同一个 URL。',
+  'settings.listen.actual': '当前实际绑定',
+  'settings.listen.save': '保存',
+  'settings.listen.saved': '已保存，重启 Prism 后生效。',
+  'settings.listen.saveFailed': '保存失败',
+  'settings.listen.copyBaseUrl': '复制 Base URL',
+  'settings.listen.copied': '已复制',
+  'settings.listen.copyFailed': '复制失败',
+  'settings.listen.mismatch': '配置地址与实际绑定不一致（启动时端口可能被占用）。重启 Prism 可重新尝试。',
+
+  'settings.tunnel.title': 'Cloudflare 命名隧道（固定 URL）',
+  'settings.tunnel.hint':
+    'trycloudflare 每次重启都会换新的随机 URL。切换到命名隧道可以拥有永久稳定的域名——需要 Cloudflare 账号、自有域名，以及在 Zero Trust 控制台拿到的 tunnel token。',
+  'settings.tunnel.hostname': '公网域名',
+  'settings.tunnel.hostnameHint': '裸域名，不要带协议。必须与你在 Cloudflare 给该隧道分配的公网域名完全一致。',
+  'settings.tunnel.token': '隧道 token',
+  'settings.tunnel.tokenPlaceholder': '粘贴 cloudflared 给出的长 token',
+  'settings.tunnel.tokenPlaceholderConfigured': '已有 token——填新的可轮换',
+  'settings.tunnel.tokenHint': 'Token 仅存于 prism.yaml，不会再以明文回显到本界面。',
+  'settings.tunnel.save': '保存',
+  'settings.tunnel.saved': '已保存，重启 Prism 后生效。',
+  'settings.tunnel.cleared': '已清除，重启 Prism 后生效。',
+  'settings.tunnel.saveFailed': '保存失败',
+  'settings.tunnel.clear': '关闭命名隧道',
+  'settings.tunnel.statusConfigured': '命名隧道已配置',
+  'settings.tunnel.statusOff': '正在使用 trycloudflare（随机 URL）',
 
   'onboarding.title': '欢迎使用 Prism',
   'onboarding.intro':

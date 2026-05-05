@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"sync/atomic"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
@@ -15,6 +16,12 @@ import (
 // forwards lifecycle events to domain bindings.
 type App struct {
 	ctx context.Context
+
+	// quitting flips to true the moment Quit() is invoked (e.g. from the
+	// status-bar "Quit Prism" item). BeforeClose checks this flag so that
+	// an explicit quit is allowed to proceed, while red-dot / Cmd+W on
+	// the window still hides Prism into the menu bar.
+	quitting atomic.Bool
 
 	boot     *embed.BootResult
 	tun      *tunnel.Cloudflared
@@ -66,28 +73,39 @@ func (a *App) Navigate(path string) {
 
 // Quit terminates the Wails application, stopping the core, tunnel and
 // menu bar item. Used by the "Quit Prism" row in the status bar menu.
+//
+// Important: BeforeClose normally returns true (prevent close) so the red
+// dot / Cmd+W only hide the window. We flip quitting=true here so the
+// upcoming BeforeClose call lets the close proceed.
 func (a *App) Quit() {
 	if a.ctx == nil {
 		return
 	}
+	a.quitting.Store(true)
 	runtime.Quit(a.ctx)
 }
 
 // Boot runs before Wails main loop; boots one-hub core so bindings can use
 // model.* etc. We return so that main() can install bindings that reference
 // the core state.
+//
+// ListenAddr is intentionally not set here so embed.Boot picks it up from
+// prism.yaml (`listen_addr`), defaulting to 127.0.0.1:39527. Keeping the
+// port stable across restarts is what lets external clients (Cursor / IDE
+// extensions) hold a single URL.
 func (a *App) Boot(version string) error {
 	res, err := embed.Boot(embed.BootOptions{
-		AppName:    "Prism",
-		ListenAddr: "127.0.0.1:0",
+		AppName: "Prism",
 	})
 	if err != nil {
 		return err
 	}
 	a.boot = res
 	a.tun = &tunnel.Cloudflared{
-		Binary:    cloudflaredBinaryPath(),
-		LocalPort: httpPort(res.HTTPAddr),
+		Binary:         cloudflaredBinaryPath(),
+		LocalPort:      httpPort(res.HTTPAddr),
+		TunnelToken:    res.TunnelToken,
+		PublicHostname: res.TunnelHostname,
 	}
 	a.system = bindings.NewSystemAPI(version, res)
 	a.tunnel = bindings.NewTunnelAPI(a.tun)
@@ -96,6 +114,7 @@ func (a *App) Boot(version string) error {
 	a.logs = bindings.NewLogsAPI()
 	a.traces = bindings.NewTracesAPI()
 	a.settings = bindings.NewSettingsAPI(res.DataDir, res.LogDir)
+	a.settings.SetActualListenAddr(res.HTTPAddr)
 	return nil
 }
 
@@ -113,8 +132,15 @@ func (a *App) Startup(ctx context.Context) {
 // BeforeClose is wired to Wails' OnBeforeClose hook in main.go. Returning
 // `true` tells Wails to abort the close and leave the process running; we
 // then manually hide the window and drop the Dock icon so Prism continues
-// as a pure menu bar app. Quit() is the only path that actually exits.
+// as a pure menu bar app.
+//
+// When Quit() has been invoked (status-bar "Quit Prism"), the quitting flag
+// is set; in that case we do NOT prevent the close, so Wails proceeds with
+// shutdown and OnShutdown can clean up tunnel + DB.
 func (a *App) BeforeClose(ctx context.Context) (prevent bool) {
+	if a.quitting.Load() {
+		return false
+	}
 	a.Hide()
 	return true
 }
