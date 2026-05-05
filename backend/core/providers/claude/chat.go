@@ -291,6 +291,74 @@ func ConvertToolChoice(toolType, toolFunc string) *ToolChoice {
 	return choice
 }
 
+// tryParseAsClaudeContent recognises message content that's already in
+// Anthropic's native shape (text / image / tool_use / tool_result /
+// thinking / redacted_thinking parts) and returns it verbatim as
+// []MessageContent. Returns ok=false for anything that doesn't look
+// Claude-native so the caller can fall back to the OpenAI parser.
+//
+// Trigger conditions (any one):
+//   - a part has type tool_use, tool_result, thinking, or redacted_thinking
+//   - a part carries a Claude-only field (tool_use_id / id / input / content)
+//
+// Plain OpenAI multipart (text + image_url only) deliberately doesn't
+// trigger this so existing callers stay on the legacy code path.
+func tryParseAsClaudeContent(raw any) ([]MessageContent, bool) {
+	if raw == nil {
+		return nil, false
+	}
+	// Strings never carry Claude-native parts; let the standard path handle them.
+	if _, ok := raw.(string); ok {
+		return nil, false
+	}
+	bytes, err := json.Marshal(raw)
+	if err != nil {
+		return nil, false
+	}
+	// Probe shape first using a permissive map[] form so we can sniff for
+	// Anthropic-only fields without committing to a struct decode that
+	// might mask shape mismatches.
+	var probe []map[string]any
+	if err := json.Unmarshal(bytes, &probe); err != nil {
+		return nil, false
+	}
+	if len(probe) == 0 {
+		return nil, false
+	}
+	looksClaude := false
+	for _, p := range probe {
+		t, _ := p["type"].(string)
+		switch t {
+		case ContentTypeToolUes, ContentTypeToolResult, "thinking", "redacted_thinking":
+			looksClaude = true
+		}
+		if looksClaude {
+			break
+		}
+		// Field-level sniff: tool_use_id, id (only used by tool_use),
+		// input (tool_use), or a structured `content` payload that the
+		// OpenAI multipart shape never sets.
+		if _, ok := p["tool_use_id"]; ok {
+			looksClaude = true
+			break
+		}
+		if _, ok := p["input"]; ok {
+			if _, idOk := p["id"]; idOk {
+				looksClaude = true
+				break
+			}
+		}
+	}
+	if !looksClaude {
+		return nil, false
+	}
+	var parts []MessageContent
+	if err := json.Unmarshal(bytes, &parts); err != nil {
+		return nil, false
+	}
+	return parts, true
+}
+
 func convertMessageContent(msg *types.ChatCompletionMessage) (*Message, error) {
 	message := Message{
 		Role: convertRole(msg.Role),
@@ -324,6 +392,19 @@ func convertMessageContent(msg *types.ChatCompletionMessage) (*Message, error) {
 		})
 
 		message.Content = content
+		return &message, nil
+	}
+
+	// Fast path: when the caller already speaks Claude's native message
+	// schema (e.g. Cursor / Anthropic SDK clients hitting /v1/chat/completions
+	// with `tool_use` / `tool_result` parts), parse straight into
+	// []MessageContent so Anthropic-only fields like `tool_use_id`,
+	// `content`, `id`, `input`, `is_error`, `cache_control` survive the
+	// round-trip. Routing through ParseContent silently drops them, which
+	// makes Bedrock reject the request with "user messages must have
+	// non-empty content".
+	if claudeParts, ok := tryParseAsClaudeContent(msg.Content); ok {
+		message.Content = claudeParts
 		return &message, nil
 	}
 
