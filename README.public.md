@@ -8,6 +8,10 @@ Read this in [简体中文](./README.zh-CN.md).
 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Releases](https://img.shields.io/github/v/release/autogame-17/prism)](https://github.com/autogame-17/prism/releases)
+[![Downloads](https://img.shields.io/github/downloads/autogame-17/prism/total)](https://github.com/autogame-17/prism/releases)
+[![Stars](https://img.shields.io/github/stars/autogame-17/prism?style=flat)](https://github.com/autogame-17/prism/stargazers)
+[![Last commit](https://img.shields.io/github/last-commit/autogame-17/prism)](https://github.com/autogame-17/prism/commits/main)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](https://github.com/autogame-17/prism/releases/latest)
 [![Go 1.24+](https://img.shields.io/badge/Go-1.24%2B-00ADD8.svg)](https://go.dev/)
 [![Wails v2](https://img.shields.io/badge/Wails-v2-DF0000.svg)](https://wails.io/)
 
