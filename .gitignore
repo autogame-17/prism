@@ -9,6 +9,7 @@ node_modules/
 # Release artefacts
 dist/
 dist-public/
+.release-backup/
 
 # Generated TypeScript build artefacts
 frontend/tsconfig*.tsbuildinfo
