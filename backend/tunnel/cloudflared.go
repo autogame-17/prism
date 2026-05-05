@@ -25,12 +25,42 @@ const (
 	StatusError    Status = "error"
 )
 
-// Cloudflared manages a single `cloudflared tunnel --url` subprocess.
+// Cloudflared manages a single cloudflared subprocess. It supports two
+// connection modes that get picked at Start time based on which fields
+// the caller populated:
+//
+//	trycloudflare (default)
+//	  Started with `cloudflared tunnel --url http://127.0.0.1:<LocalPort>`.
+//	  Public URL is a brand-new <random>.trycloudflare.com domain
+//	  scraped out of cloudflared's own log line, surfaced via OnURL.
+//	  The URL changes on every Start, so external clients need to
+//	  re-pin it after each Prism restart.
+//
+//	named tunnel  (TunnelToken non-empty)
+//	  Started with `cloudflared tunnel run --token <TunnelToken>`.
+//	  cloudflared connects to a Cloudflare account-bound tunnel whose
+//	  ingress + hostname are configured in the Cloudflare dashboard,
+//	  giving you a stable hostname (e.g. prism.example.com) that
+//	  survives restarts. Because the hostname isn't visible in the
+//	  cloudflared logs, the caller MUST also populate PublicHostname
+//	  so the UI / OnURL callback knows which URL to surface.
 type Cloudflared struct {
 	Binary    string
 	LocalPort int
 	LogWriter io.Writer // optional additional sink (e.g. EventsEmit bridge)
 	OnURL     func(string)
+
+	// TunnelToken, when non-empty, switches into named-tunnel mode.
+	// The token is opaque to us: cloudflared decodes it and pulls
+	// down the ingress configuration on its own. Empty falls back
+	// to trycloudflare.
+	TunnelToken string
+
+	// PublicHostname is the user-visible URL (without scheme; e.g.
+	// "prism.example.com") that named-tunnel mode should report to
+	// OnURL once the connection is up. Ignored in trycloudflare mode
+	// where the hostname is auto-discovered from logs.
+	PublicHostname string
 
 	mu         sync.Mutex
 	cmd        *exec.Cmd
@@ -49,6 +79,10 @@ type Snapshot struct {
 	LocalPort  int    `json:"localPort"`
 	LastError  string `json:"lastError,omitempty"`
 	BinaryPath string `json:"binaryPath"`
+	// Mode is "named" when running with a TunnelToken (stable URL,
+	// requires Cloudflare account + hostname), otherwise "trycloudflare"
+	// (random URL per Start, no account needed).
+	Mode string `json:"mode"`
 }
 
 func (c *Cloudflared) Snapshot() Snapshot {
@@ -58,6 +92,10 @@ func (c *Cloudflared) Snapshot() Snapshot {
 	if !c.startedAt.IsZero() {
 		started = c.startedAt.UnixMilli()
 	}
+	mode := "trycloudflare"
+	if c.TunnelToken != "" {
+		mode = "named"
+	}
 	return Snapshot{
 		Status:     c.status,
 		URL:        c.currentURL,
@@ -65,11 +103,22 @@ func (c *Cloudflared) Snapshot() Snapshot {
 		LocalPort:  c.LocalPort,
 		LastError:  c.lastError,
 		BinaryPath: c.Binary,
+		Mode:       mode,
 	}
 }
 
 // Start launches cloudflared and returns as soon as the process is spawned.
 // The discovered public URL is delivered asynchronously via OnURL.
+//
+// Two command shapes are emitted depending on TunnelToken:
+//
+//	trycloudflare:  cloudflared tunnel --url http://127.0.0.1:<port> --no-autoupdate
+//	named tunnel:   cloudflared tunnel --no-autoupdate run --token <TOKEN>
+//
+// In named-tunnel mode we don't pass --url because the ingress (and
+// therefore the upstream port) is configured in the Cloudflare dashboard
+// and baked into the token. The user is responsible for pointing that
+// ingress at LocalPort.
 func (c *Cloudflared) Start() error {
 	c.mu.Lock()
 	if c.cmd != nil && c.cmd.Process != nil {
@@ -82,8 +131,13 @@ func (c *Cloudflared) Start() error {
 		c.mu.Unlock()
 		return err
 	}
-	url := fmt.Sprintf("http://127.0.0.1:%d", c.LocalPort)
-	cmd := exec.Command(c.Binary, "tunnel", "--url", url, "--no-autoupdate")
+	var cmd *exec.Cmd
+	if c.TunnelToken != "" {
+		cmd = exec.Command(c.Binary, "tunnel", "--no-autoupdate", "run", "--token", c.TunnelToken)
+	} else {
+		url := fmt.Sprintf("http://127.0.0.1:%d", c.LocalPort)
+		cmd = exec.Command(c.Binary, "tunnel", "--url", url, "--no-autoupdate")
+	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		c.mu.Unlock()
@@ -105,7 +159,26 @@ func (c *Cloudflared) Start() error {
 	c.startedAt = time.Now()
 	c.currentURL = ""
 	c.lastError = ""
+	// named-tunnel mode knows the public hostname before cloudflared
+	// even connects, so we surface it immediately. The connection may
+	// still be in-flight, but the URL itself is stable and any client
+	// already pointed at it will succeed as soon as cloudflared
+	// registers with the Cloudflare edge. If the user forgot to set
+	// PublicHostname we leave currentURL empty — the UI will still
+	// show "running" via the status flip below, just without a URL.
+	announceNamedURL := ""
+	if c.TunnelToken != "" {
+		c.status = StatusRunning
+		if c.PublicHostname != "" {
+			announceNamedURL = "https://" + c.PublicHostname
+			c.currentURL = announceNamedURL
+		}
+	}
 	c.mu.Unlock()
+
+	if announceNamedURL != "" && c.OnURL != nil {
+		c.OnURL(announceNamedURL)
+	}
 
 	go c.pipeReader(stdout)
 	go c.pipeReader(stderr)
@@ -184,6 +257,12 @@ func (c *Cloudflared) pipeReader(r io.Reader) {
 		line := scanner.Text()
 		if c.LogWriter != nil {
 			_, _ = c.LogWriter.Write([]byte(line + "\n"))
+		}
+		// In named-tunnel mode the URL is the user-configured hostname,
+		// not something we can scrape from the log. Skip the regex
+		// (it would only ever match trycloudflare.com domains anyway).
+		if c.TunnelToken != "" {
+			continue
 		}
 		if match := urlRegex.FindString(line); match != "" {
 			c.mu.Lock()

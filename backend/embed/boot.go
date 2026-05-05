@@ -45,6 +45,13 @@ type BootResult struct {
 	DataDir  string
 	LogDir   string
 	Server   *http.Server
+	// TunnelToken is the named-tunnel token read from prism.yaml's
+	// `cloudflare.tunnel_token`. Empty means trycloudflare mode.
+	TunnelToken string
+	// TunnelHostname is the public hostname configured for the named
+	// tunnel (e.g. "prism.example.com"). Used only for UI display and
+	// the OnURL callback; the actual ingress comes from the token.
+	TunnelHostname string
 }
 
 // Boot initialises the embedded one-hub core and starts a local gin server.
@@ -176,10 +183,12 @@ func Boot(opts BootOptions) (*BootResult, error) {
 	}()
 
 	return &BootResult{
-		HTTPAddr: ln.Addr().String(),
-		DataDir:  paths.DataDir,
-		LogDir:   paths.LogDir,
-		Server:   srv,
+		HTTPAddr:       ln.Addr().String(),
+		DataDir:        paths.DataDir,
+		LogDir:         paths.LogDir,
+		Server:         srv,
+		TunnelToken:    viper.GetString("cloudflare.tunnel_token"),
+		TunnelHostname: viper.GetString("cloudflare.tunnel_hostname"),
 	}, nil
 }
 

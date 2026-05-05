@@ -370,6 +370,72 @@ func readListenAddrFromYAML(path string) (string, error) {
 // The write is atomic: we serialise to a sibling temp file, fsync, then
 // rename over the original so a crash mid-write can't corrupt the config.
 func writeListenAddrToYAML(path string, addr string) error {
+	return writeStringFieldToYAML(path, "listen_addr", addr)
+}
+
+// CloudflareTunnelInfo describes the named-tunnel configuration. Token
+// is intentionally NOT echoed back to the UI in cleartext; we only
+// signal whether one is set so the user can decide whether to clear or
+// rotate it. Hostname round-trips fine because it's user-public anyway
+// (it's the URL their clients are calling).
+type CloudflareTunnelInfo struct {
+	HasToken bool   `json:"hasToken"`
+	Hostname string `json:"hostname"`
+}
+
+// GetCloudflareTunnel reads the named-tunnel config out of prism.yaml.
+func (a *SettingsAPI) GetCloudflareTunnel() (CloudflareTunnelInfo, error) {
+	path := filepath.Join(a.dataDir, "prism.yaml")
+	token, err := readNestedStringFromYAML(path, "cloudflare", "tunnel_token")
+	if err != nil {
+		return CloudflareTunnelInfo{}, err
+	}
+	host, err := readNestedStringFromYAML(path, "cloudflare", "tunnel_hostname")
+	if err != nil {
+		return CloudflareTunnelInfo{}, err
+	}
+	return CloudflareTunnelInfo{HasToken: token != "", Hostname: host}, nil
+}
+
+// SetCloudflareTunnel persists a named-tunnel token + public hostname
+// to prism.yaml. Pass empty token to clear the override (Prism will fall
+// back to trycloudflare on next start). Hostname must be a bare host
+// (e.g. "prism.example.com"), no scheme.
+//
+// Like other settings writes, the change does NOT take effect until the
+// user restarts Prism, because the cloudflared subprocess captures the
+// token at Start time. The caller (UI) is responsible for surfacing the
+// restart hint.
+func (a *SettingsAPI) SetCloudflareTunnel(token, hostname string) error {
+	token = strings.TrimSpace(token)
+	hostname = strings.TrimSpace(hostname)
+	// Reject obvious user mistakes early. We don't try to validate the
+	// token format itself — cloudflared will tell us soon enough if it's
+	// wrong, and the format isn't publicly specified anyway.
+	if hostname != "" {
+		if strings.Contains(hostname, "://") || strings.Contains(hostname, "/") {
+			return errors.New("hostname must be a bare host, e.g. prism.example.com (no scheme, no path)")
+		}
+	}
+	if (token == "") != (hostname == "") {
+		return errors.New("token and hostname must both be set or both empty")
+	}
+	path := filepath.Join(a.dataDir, "prism.yaml")
+	if err := writeNestedStringFieldToYAML(path, "cloudflare", "tunnel_token", token); err != nil {
+		return err
+	}
+	return writeNestedStringFieldToYAML(path, "cloudflare", "tunnel_hostname", hostname)
+}
+
+// writeStringFieldToYAML rewrites prism.yaml so that the named top-level
+// scalar key equals value. Existing comments, ordering and untouched
+// fields are preserved. Empty value removes the key entirely. The write
+// is atomic via tmp+rename, so a crash mid-write can't corrupt the file.
+//
+// The value is always emitted as a quoted YAML string (`key: "value"`)
+// so that scalars like "127.0.0.1:39527" or hostnames containing dots
+// can never be misparsed as integers / booleans / unintended types.
+func writeStringFieldToYAML(path, key, value string) error {
 	body, err := os.ReadFile(path)
 	if err != nil {
 		if !os.IsNotExist(err) {
@@ -379,10 +445,11 @@ func writeListenAddrToYAML(path string, addr string) error {
 	}
 
 	var newLine string
-	if addr != "" {
-		newLine = fmt.Sprintf("listen_addr: %q", addr)
+	if value != "" {
+		newLine = fmt.Sprintf("%s: %q", key, value)
 	}
 
+	prefix := key + ":"
 	scanner := bufio.NewScanner(bytes.NewReader(body))
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 	var out bytes.Buffer
@@ -390,7 +457,7 @@ func writeListenAddrToYAML(path string, addr string) error {
 	for scanner.Scan() {
 		line := scanner.Text()
 		trimmed := strings.TrimLeft(line, " \t")
-		if trimmed == line && strings.HasPrefix(trimmed, "listen_addr:") {
+		if trimmed == line && strings.HasPrefix(trimmed, prefix) {
 			if newLine != "" {
 				out.WriteString(newLine)
 				out.WriteByte('\n')
@@ -405,12 +472,176 @@ func writeListenAddrToYAML(path string, addr string) error {
 		return fmt.Errorf("scan %s: %w", path, err)
 	}
 	if !replaced && newLine != "" {
-		// Append after a trailing newline if missing.
 		if out.Len() > 0 && out.Bytes()[out.Len()-1] != '\n' {
 			out.WriteByte('\n')
 		}
 		out.WriteString(newLine)
 		out.WriteByte('\n')
+	}
+
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, out.Bytes(), 0o600); err != nil {
+		return fmt.Errorf("write %s: %w", tmp, err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("rename %s: %w", path, err)
+	}
+	return nil
+}
+
+// readNestedStringFromYAML reads a two-level nested key (parent: child:
+// value) without bringing in a full YAML parser. We deliberately keep
+// this minimal: only one level of nesting, only string scalars, only
+// space-indented (no tabs). Good enough for prism.yaml's hand-curated
+// shape; nothing else writes there.
+//
+// Returns ("", nil) when the file or the key is missing — the caller
+// can't tell those apart, but neither needs to.
+func readNestedStringFromYAML(path, parent, child string) (string, error) {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", fmt.Errorf("read %s: %w", path, err)
+	}
+	scanner := bufio.NewScanner(bytes.NewReader(body))
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	parentPrefix := parent + ":"
+	childPrefix := child + ":"
+	inParent := false
+	for scanner.Scan() {
+		line := scanner.Text()
+		trimmed := strings.TrimLeft(line, " \t")
+		// Top-level (no indentation): tracks whether we're currently
+		// inside the parent block.
+		if trimmed == line {
+			inParent = strings.HasPrefix(trimmed, parentPrefix)
+			continue
+		}
+		if !inParent {
+			continue
+		}
+		if !strings.HasPrefix(trimmed, childPrefix) {
+			continue
+		}
+		val := strings.TrimSpace(strings.TrimPrefix(trimmed, childPrefix))
+		val = strings.Trim(val, `"'`)
+		return val, nil
+	}
+	return "", scanner.Err()
+}
+
+// writeNestedStringFieldToYAML upserts a two-level nested key (`parent:
+// \n  child: value`). It preserves the rest of the file and respects
+// pre-existing indentation of the parent block — if the user's other
+// children use 4 spaces, ours will too. Defaults to 2 spaces when the
+// block is empty / missing.
+//
+// Empty value removes just the child line; the parent block stays even
+// if it would end up empty (we don't want to delete a key the user
+// added other things under).
+func writeNestedStringFieldToYAML(path, parent, child, value string) error {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("read %s: %w", path, err)
+		}
+		body = nil
+	}
+	parentPrefix := parent + ":"
+	childPrefix := child + ":"
+
+	scanner := bufio.NewScanner(bytes.NewReader(body))
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	var (
+		out             bytes.Buffer
+		inParent        bool
+		parentExists    bool
+		replacedChild   bool
+		detectedIndent  string // indentation seen on existing siblings
+		justLeftParent  bool   // marker so we can append the child before exiting
+	)
+	defaultIndent := "  "
+
+	flushChildBeforeLeavingParent := func() {
+		if value == "" || replacedChild {
+			return
+		}
+		indent := detectedIndent
+		if indent == "" {
+			indent = defaultIndent
+		}
+		out.WriteString(indent)
+		out.WriteString(fmt.Sprintf("%s %q", childPrefix, value))
+		out.WriteByte('\n')
+		replacedChild = true
+	}
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		trimmed := strings.TrimLeft(line, " \t")
+		isTopLevel := trimmed == line
+		if isTopLevel {
+			// Leaving the previous parent — append child if needed
+			// before the new top-level block begins.
+			if inParent {
+				flushChildBeforeLeavingParent()
+				justLeftParent = true
+			}
+			inParent = strings.HasPrefix(trimmed, parentPrefix)
+			if inParent {
+				parentExists = true
+				detectedIndent = ""
+			}
+			out.WriteString(line)
+			out.WriteByte('\n')
+			_ = justLeftParent
+			continue
+		}
+		// Non-top-level: capture indentation if we're tracking siblings,
+		// and check whether this is the child we want to overwrite.
+		if inParent {
+			indent := line[:len(line)-len(trimmed)]
+			if detectedIndent == "" {
+				detectedIndent = indent
+			}
+			if strings.HasPrefix(trimmed, childPrefix) {
+				if value != "" {
+					out.WriteString(indent)
+					out.WriteString(fmt.Sprintf("%s %q", childPrefix, value))
+					out.WriteByte('\n')
+				}
+				replacedChild = true
+				continue
+			}
+		}
+		out.WriteString(line)
+		out.WriteByte('\n')
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("scan %s: %w", path, err)
+	}
+
+	// File ended while still inside the parent block — flush pending
+	// child onto the tail.
+	if inParent {
+		flushChildBeforeLeavingParent()
+	}
+
+	// Parent didn't exist at all and we have a value to write — append
+	// the whole parent block at the bottom of the file.
+	if !parentExists && value != "" {
+		if out.Len() > 0 && out.Bytes()[out.Len()-1] != '\n' {
+			out.WriteByte('\n')
+		}
+		out.WriteString(parentPrefix)
+		out.WriteByte('\n')
+		out.WriteString(defaultIndent)
+		out.WriteString(fmt.Sprintf("%s %q", childPrefix, value))
+		out.WriteByte('\n')
+		replacedChild = true
 	}
 
 	tmp := path + ".tmp"

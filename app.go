@@ -102,8 +102,10 @@ func (a *App) Boot(version string) error {
 	}
 	a.boot = res
 	a.tun = &tunnel.Cloudflared{
-		Binary:    cloudflaredBinaryPath(),
-		LocalPort: httpPort(res.HTTPAddr),
+		Binary:         cloudflaredBinaryPath(),
+		LocalPort:      httpPort(res.HTTPAddr),
+		TunnelToken:    res.TunnelToken,
+		PublicHostname: res.TunnelHostname,
 	}
 	a.system = bindings.NewSystemAPI(version, res)
 	a.tunnel = bindings.NewTunnelAPI(a.tun)
