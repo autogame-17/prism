@@ -7,9 +7,11 @@
   "comment": "Default include = every git-tracked file. The exclude list below is the only thing you maintain. New code will auto-flow to the public mirror unless added to exclude.",
   "exclude": [
     "AGENTS.md",
+    "README.md",
     "public.manifest.json",
     "scripts/build_public.sh",
     "scripts/publish_public.sh",
+    "scripts/redact_hero.py",
     ".public-only/**",
     "docs/internal/**",
     "*.draft.md"
