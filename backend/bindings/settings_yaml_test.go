@@ -237,6 +237,51 @@ func TestNestedYAML_MultiFieldClearsBothAtOnce(t *testing.T) {
 	}
 }
 
+// %q-escaped round-trip — the writer emits values via fmt.Sprintf("%q",...)
+// which Go-escapes backslash and quote. The reader must unescape them with
+// strconv.Unquote, otherwise a token / hostname containing those characters
+// silently corrupts on the second read. Bugbot called this out as a latent
+// bug; the test pins it down.
+func TestNestedYAML_QuoteAndBackslashRoundTrip(t *testing.T) {
+	cases := []string{
+		`a"b`,         // inner double-quote
+		`back\slash`,  // single backslash
+		`mix\"quote`,  // backslash followed by quote
+		`tab\there`,   // literal `\t` two chars (NOT an actual tab)
+		`plain-token`, // sanity baseline
+	}
+	for _, want := range cases {
+		p := writeFile(t, "")
+		if err := writeNestedStringFieldToYAML(p, "cloudflare", "tunnel_token", want); err != nil {
+			t.Fatalf("write %q: %v", want, err)
+		}
+		got, err := readNestedStringFromYAML(p, "cloudflare", "tunnel_token")
+		if err != nil {
+			t.Fatalf("read %q: %v", want, err)
+		}
+		if got != want {
+			t.Errorf("round-trip lost data:\n  wrote %q\n  read  %q", want, got)
+		}
+	}
+}
+
+// Same coverage on the flat helper so listen_addr can survive odd values
+// (mostly defensive — listen_addr in practice is `host:port`, no escapes).
+func TestFlatYAML_QuoteAndBackslashRoundTrip(t *testing.T) {
+	want := `weird"value\with\stuff`
+	p := writeFile(t, "")
+	if err := writeStringFieldToYAML(p, "listen_addr", want); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	got, err := readListenAddrFromYAML(p)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if got != want {
+		t.Errorf("round-trip lost data:\n  wrote %q\n  read  %q", want, got)
+	}
+}
+
 // Make sure nested writes don't break the flat helper used by
 // listen_addr — writing both must keep both readable side by side.
 func TestNestedAndFlat_Coexist(t *testing.T) {

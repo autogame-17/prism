@@ -329,7 +329,7 @@ func tryParseAsClaudeContent(raw any) ([]MessageContent, bool) {
 	for _, p := range probe {
 		t, _ := p["type"].(string)
 		switch t {
-		case ContentTypeToolUes, ContentTypeToolResult, "thinking", "redacted_thinking":
+		case ContentTypeToolUes, ContentTypeToolResult, ContentTypeThinking, ContentTypeRedactedThinking:
 			looksClaude = true
 		}
 		if looksClaude {

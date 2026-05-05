@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -334,6 +335,28 @@ func validateListenAddr(addr string) error {
 	return nil
 }
 
+// unquoteYAMLScalar undoes the encoding our writers apply when they
+// emit a value with fmt.Sprintf("%q", ...). Without this step a
+// hostname or token containing a backslash or quote would round-trip
+// corrupted: the writer turns `a"b` into the on-disk bytes `"a\"b"`,
+// and a naive reader that just strips outer quotes would hand the
+// rest of the system `a\"b` instead of the original `a"b`.
+//
+// For values that aren't double-quoted on disk (user-edited plain
+// scalars, or single-quoted forms) we fall back to the looser
+// strip-outer-quotes behaviour so we don't break hand-written configs.
+func unquoteYAMLScalar(val string) string {
+	val = strings.TrimSpace(val)
+	if len(val) >= 2 && val[0] == '"' && val[len(val)-1] == '"' {
+		if unquoted, err := strconv.Unquote(val); err == nil {
+			return unquoted
+		}
+		// Malformed quoted form — fall through to the looser strip
+		// rather than discard whatever the user has on disk.
+	}
+	return strings.Trim(val, `"'`)
+}
+
 // readListenAddrFromYAML scans prism.yaml line by line and returns the first
 // top-level `listen_addr:` value. Returns "" if the key isn't present.
 // We deliberately avoid full YAML parsing so we can also _write_ the file
@@ -357,9 +380,8 @@ func readListenAddrFromYAML(path string) (string, error) {
 		if !strings.HasPrefix(trimmed, "listen_addr:") {
 			continue
 		}
-		val := strings.TrimSpace(strings.TrimPrefix(trimmed, "listen_addr:"))
-		val = strings.Trim(val, `"'`)
-		return val, nil
+		val := strings.TrimPrefix(trimmed, "listen_addr:")
+		return unquoteYAMLScalar(val), nil
 	}
 	return "", scanner.Err()
 }
@@ -541,9 +563,8 @@ func readNestedStringFromYAML(path, parent, child string) (string, error) {
 		if !strings.HasPrefix(trimmed, childPrefix) {
 			continue
 		}
-		val := strings.TrimSpace(strings.TrimPrefix(trimmed, childPrefix))
-		val = strings.Trim(val, `"'`)
-		return val, nil
+		val := strings.TrimPrefix(trimmed, childPrefix)
+		return unquoteYAMLScalar(val), nil
 	}
 	return "", scanner.Err()
 }
