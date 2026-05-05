@@ -5,6 +5,10 @@
 #
 # Usage: ./scripts/fetch_cloudflared.sh [version]
 #        version defaults to "latest".
+#
+# Bash 3.2-compatible: macOS still ships /bin/bash 3.2 and `declare -A`
+# (associative arrays) blow up there with the cryptic "unbound variable"
+# error under `set -u`. We use parallel-key/value entries instead.
 set -euo pipefail
 
 VERSION="${1:-latest}"
@@ -16,17 +20,19 @@ fi
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$ROOT/resources/cloudflared"
 
-declare -A TARGETS=(
-  [darwin-arm64]="cloudflared-darwin-arm64.tgz"
-  [darwin-amd64]="cloudflared-darwin-amd64.tgz"
-  [linux-amd64]="cloudflared-linux-amd64"
-  [linux-arm64]="cloudflared-linux-arm64"
-  [windows-amd64]="cloudflared-windows-amd64.exe"
+# Each entry is "<os-arch>:<asset filename>". Order is preserved.
+TARGETS=(
+  "darwin-arm64:cloudflared-darwin-arm64.tgz"
+  "darwin-amd64:cloudflared-darwin-amd64.tgz"
+  "linux-amd64:cloudflared-linux-amd64"
+  "linux-arm64:cloudflared-linux-arm64"
+  "windows-amd64:cloudflared-windows-amd64.exe"
 )
 
 mkdir -p "$OUT"
-for key in "${!TARGETS[@]}"; do
-  asset="${TARGETS[$key]}"
+for entry in "${TARGETS[@]}"; do
+  key="${entry%%:*}"
+  asset="${entry#*:}"
   dir="$OUT/$key"
   mkdir -p "$dir"
   echo ">> $key <= $asset"
