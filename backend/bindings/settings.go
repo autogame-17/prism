@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -420,11 +421,18 @@ func (a *SettingsAPI) SetCloudflareTunnel(token, hostname string) error {
 	if (token == "") != (hostname == "") {
 		return errors.New("token and hostname must both be set or both empty")
 	}
-	path := filepath.Join(a.dataDir, "prism.yaml")
-	if err := writeNestedStringFieldToYAML(path, "cloudflare", "tunnel_token", token); err != nil {
-		return err
-	}
-	return writeNestedStringFieldToYAML(path, "cloudflare", "tunnel_hostname", hostname)
+	// Both fields go through one atomic file rewrite. Two separate
+	// writes would expose a window where the file has token without
+	// hostname (or vice versa) if the second write fails — exactly
+	// the invariant we just validated.
+	return writeNestedStringFieldsToYAML(
+		filepath.Join(a.dataDir, "prism.yaml"),
+		"cloudflare",
+		map[string]string{
+			"tunnel_token":    token,
+			"tunnel_hostname": hostname,
+		},
+	)
 }
 
 // writeStringFieldToYAML rewrites prism.yaml so that the named top-level
@@ -514,6 +522,13 @@ func readNestedStringFromYAML(path, parent, child string) (string, error) {
 	for scanner.Scan() {
 		line := scanner.Text()
 		trimmed := strings.TrimLeft(line, " \t")
+		// Blank lines don't change scope — YAML allows them inside
+		// block mappings. Without this guard the empty-string case
+		// would satisfy `trimmed == line`, flip inParent off, and
+		// any sibling key below the blank line would be invisible.
+		if trimmed == "" {
+			continue
+		}
 		// Top-level (no indentation): tracks whether we're currently
 		// inside the parent block.
 		if trimmed == line {
@@ -533,16 +548,31 @@ func readNestedStringFromYAML(path, parent, child string) (string, error) {
 	return "", scanner.Err()
 }
 
-// writeNestedStringFieldToYAML upserts a two-level nested key (`parent:
-// \n  child: value`). It preserves the rest of the file and respects
+// writeNestedStringFieldToYAML upserts a single two-level nested key.
+// Wraps the multi-field helper so callers that only touch one field
+// don't have to construct a map. See writeNestedStringFieldsToYAML.
+func writeNestedStringFieldToYAML(path, parent, child, value string) error {
+	return writeNestedStringFieldsToYAML(path, parent, map[string]string{child: value})
+}
+
+// writeNestedStringFieldsToYAML upserts one or more two-level nested
+// keys (`parent:\n  child1: v1\n  child2: v2`) in a single atomic
+// file write. It preserves the rest of the file and respects the
 // pre-existing indentation of the parent block — if the user's other
 // children use 4 spaces, ours will too. Defaults to 2 spaces when the
 // block is empty / missing.
 //
-// Empty value removes just the child line; the parent block stays even
-// if it would end up empty (we don't want to delete a key the user
-// added other things under).
-func writeNestedStringFieldToYAML(path, parent, child, value string) error {
+// Empty value for a child removes just that child line; siblings stay.
+// Empty value for every child is a no-op for the parent block (we
+// don't try to delete the parent itself).
+//
+// Atomicity is critical: SetCloudflareTunnel needs token + hostname
+// to land together so the "both set or both empty" invariant can't
+// be violated by a crash between two separate file rewrites.
+func writeNestedStringFieldsToYAML(path, parent string, children map[string]string) error {
+	if len(children) == 0 {
+		return nil
+	}
 	body, err := os.ReadFile(path)
 	if err != nil {
 		if !os.IsNotExist(err) {
@@ -551,7 +581,15 @@ func writeNestedStringFieldToYAML(path, parent, child, value string) error {
 		body = nil
 	}
 	parentPrefix := parent + ":"
-	childPrefix := child + ":"
+
+	// Stable iteration order so freshly-created parent blocks are
+	// deterministic across runs / test invocations.
+	keys := make([]string, 0, len(children))
+	for k := range children {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	replaced := make(map[string]bool, len(children))
 
 	scanner := bufio.NewScanner(bytes.NewReader(body))
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
@@ -559,34 +597,54 @@ func writeNestedStringFieldToYAML(path, parent, child, value string) error {
 		out            bytes.Buffer
 		inParent       bool
 		parentExists   bool
-		replacedChild  bool
 		detectedIndent string // indentation seen on existing siblings
 	)
 	defaultIndent := "  "
 
-	flushChildBeforeLeavingParent := func() {
-		if value == "" || replacedChild {
-			return
-		}
+	// Flush children that haven't matched an existing line yet. Called
+	// either at end-of-parent (top-level transition) or end-of-file.
+	flushPendingBeforeLeavingParent := func() {
 		indent := detectedIndent
 		if indent == "" {
 			indent = defaultIndent
 		}
-		out.WriteString(indent)
-		out.WriteString(fmt.Sprintf("%s %q", childPrefix, value))
-		out.WriteByte('\n')
-		replacedChild = true
+		for _, k := range keys {
+			if replaced[k] {
+				continue
+			}
+			v := children[k]
+			if v == "" {
+				// Caller wants this child removed; no existing
+				// line was found, so nothing to do.
+				replaced[k] = true
+				continue
+			}
+			out.WriteString(indent)
+			out.WriteString(fmt.Sprintf("%s: %q", k, v))
+			out.WriteByte('\n')
+			replaced[k] = true
+		}
 	}
 
 	for scanner.Scan() {
 		line := scanner.Text()
 		trimmed := strings.TrimLeft(line, " \t")
+		// Blank lines are allowed inside YAML block mappings without
+		// terminating the parent. Echo them verbatim and KEEP inParent
+		// as-is — flipping it here would prematurely flush the new
+		// children above any siblings that come after the blank line,
+		// and real children below the blank line would be missed.
+		if trimmed == "" {
+			out.WriteString(line)
+			out.WriteByte('\n')
+			continue
+		}
 		isTopLevel := trimmed == line
 		if isTopLevel {
-			// Leaving the previous parent — append child if needed
+			// Leaving the previous parent — flush pending children
 			// before the new top-level block begins.
 			if inParent {
-				flushChildBeforeLeavingParent()
+				flushPendingBeforeLeavingParent()
 			}
 			inParent = strings.HasPrefix(trimmed, parentPrefix)
 			if inParent {
@@ -597,20 +655,28 @@ func writeNestedStringFieldToYAML(path, parent, child, value string) error {
 			out.WriteByte('\n')
 			continue
 		}
-		// Non-top-level: capture indentation if we're tracking siblings,
-		// and check whether this is the child we want to overwrite.
+		// Non-top-level inside parent: capture indentation and check
+		// whether this line is one of the children we're upserting.
 		if inParent {
 			indent := line[:len(line)-len(trimmed)]
 			if detectedIndent == "" {
 				detectedIndent = indent
 			}
-			if strings.HasPrefix(trimmed, childPrefix) {
-				if value != "" {
+			matchedKey := ""
+			for _, k := range keys {
+				if strings.HasPrefix(trimmed, k+":") {
+					matchedKey = k
+					break
+				}
+			}
+			if matchedKey != "" {
+				v := children[matchedKey]
+				if v != "" {
 					out.WriteString(indent)
-					out.WriteString(fmt.Sprintf("%s %q", childPrefix, value))
+					out.WriteString(fmt.Sprintf("%s: %q", matchedKey, v))
 					out.WriteByte('\n')
 				}
-				replacedChild = true
+				replaced[matchedKey] = true
 				continue
 			}
 		}
@@ -622,23 +688,37 @@ func writeNestedStringFieldToYAML(path, parent, child, value string) error {
 	}
 
 	// File ended while still inside the parent block — flush pending
-	// child onto the tail.
+	// children onto the tail.
 	if inParent {
-		flushChildBeforeLeavingParent()
+		flushPendingBeforeLeavingParent()
 	}
 
-	// Parent didn't exist at all and we have a value to write — append
-	// the whole parent block at the bottom of the file.
-	if !parentExists && value != "" {
-		if out.Len() > 0 && out.Bytes()[out.Len()-1] != '\n' {
-			out.WriteByte('\n')
+	// Parent didn't exist at all and we have at least one non-empty
+	// value to write — append a fresh parent block at the bottom.
+	if !parentExists {
+		anyToAppend := false
+		for _, v := range children {
+			if v != "" {
+				anyToAppend = true
+				break
+			}
 		}
-		out.WriteString(parentPrefix)
-		out.WriteByte('\n')
-		out.WriteString(defaultIndent)
-		out.WriteString(fmt.Sprintf("%s %q", childPrefix, value))
-		out.WriteByte('\n')
-		replacedChild = true
+		if anyToAppend {
+			if out.Len() > 0 && out.Bytes()[out.Len()-1] != '\n' {
+				out.WriteByte('\n')
+			}
+			out.WriteString(parentPrefix)
+			out.WriteByte('\n')
+			for _, k := range keys {
+				v := children[k]
+				if v == "" {
+					continue
+				}
+				out.WriteString(defaultIndent)
+				out.WriteString(fmt.Sprintf("%s: %q", k, v))
+				out.WriteByte('\n')
+			}
+		}
 	}
 
 	tmp := path + ".tmp"
