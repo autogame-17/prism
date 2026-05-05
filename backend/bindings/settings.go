@@ -312,9 +312,13 @@ func (a *SettingsAPI) SetListenAddr(addr string) error {
 	return writeListenAddrToYAML(filepath.Join(a.dataDir, "prism.yaml"), addr)
 }
 
-// validateListenAddr rejects obvious typos before they hit disk. We only
-// require host:port to parse and the port to be a positive integer; the
-// actual bind happens on next Boot, where we'll discover real conflicts.
+// validateListenAddr rejects obvious typos before they hit disk. We
+// require host:port to parse and the port to be a numeric value in
+// 1..65535. The actual bind happens on next Boot where we'll discover
+// real conflicts (and gracefully fall back to a random port), but
+// non-numeric / out-of-range ports would always fail there silently —
+// catching them here keeps the "stable local port" feature from
+// degrading without the user noticing.
 func validateListenAddr(addr string) error {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -326,11 +330,18 @@ func validateListenAddr(addr string) error {
 	if port == "" {
 		return errors.New("port required")
 	}
-	// Reject 0 — even though the underlying server supports it for ephemeral
-	// binding, persisting "127.0.0.1:0" defeats the whole point of this UI.
-	// Tell the user to delete the field instead.
+	// Reject 0 — even though the underlying server supports it for
+	// ephemeral binding, persisting "127.0.0.1:0" defeats the whole
+	// point of this UI. Tell the user to delete the field instead.
 	if port == "0" {
 		return errors.New("use empty value to disable the override; port 0 is not allowed")
+	}
+	// strconv.ParseUint with bitSize=16 enforces 1..65535 in one shot:
+	// non-numeric input fails the parse, anything > 65535 overflows
+	// uint16. The "0" case is already handled above, so we don't have
+	// to worry about ParseUint accepting it here.
+	if _, err := strconv.ParseUint(port, 10, 16); err != nil {
+		return fmt.Errorf("port %q must be a number in 1..65535", port)
 	}
 	return nil
 }
