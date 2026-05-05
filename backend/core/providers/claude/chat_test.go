@@ -112,6 +112,58 @@ func TestTryParseAsClaudeContent_RoundTrip(t *testing.T) {
 	}
 }
 
+// TestTryParseAsClaudeContent_Thinking pins the thinking-block fix
+// reported by Bugbot: without dedicated Thinking/Signature/Data fields
+// on MessageContent, the fast path would unmarshal the part successfully
+// (because of the type-tag trigger) but drop the actual thinking text,
+// emitting a structurally-empty {"type":"thinking"} block that Bedrock
+// rejects in multi-turn flows.
+func TestTryParseAsClaudeContent_ThinkingRoundTrip(t *testing.T) {
+	raw := []map[string]any{
+		{
+			"type":      "thinking",
+			"thinking":  "Let me think about this step by step...",
+			"signature": "abc123sig",
+		},
+		{
+			"type": "redacted_thinking",
+			"data": "encrypted-blob",
+		},
+	}
+	parts, ok := tryParseAsClaudeContent(raw)
+	if !ok {
+		t.Fatalf("expected ok=true for thinking content, got false")
+	}
+	if len(parts) != 2 {
+		t.Fatalf("expected 2 parts, got %d", len(parts))
+	}
+	if parts[0].Thinking != "Let me think about this step by step..." {
+		t.Errorf("thinking text dropped: %q", parts[0].Thinking)
+	}
+	if parts[0].Signature != "abc123sig" {
+		t.Errorf("signature dropped: %q", parts[0].Signature)
+	}
+	if parts[1].Data != "encrypted-blob" {
+		t.Errorf("redacted_thinking data dropped: %q", parts[1].Data)
+	}
+	// Round-trip back to JSON and confirm the restored fields make it
+	// onto the wire (this is the exact shape Bedrock receives).
+	out, err := json.Marshal(parts)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	wire := string(out)
+	if !contains(wire, `"thinking":"Let me think about this step by step..."`) {
+		t.Errorf("thinking field missing from outbound JSON: %s", wire)
+	}
+	if !contains(wire, `"signature":"abc123sig"`) {
+		t.Errorf("signature field missing from outbound JSON: %s", wire)
+	}
+	if !contains(wire, `"data":"encrypted-blob"`) {
+		t.Errorf("data field missing from outbound JSON: %s", wire)
+	}
+}
+
 func contains(s, sub string) bool {
 	return len(sub) <= len(s) && (s == sub || stringIndex(s, sub) >= 0)
 }

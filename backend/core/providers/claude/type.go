@@ -109,6 +109,18 @@ type MessageContent struct {
 	IsError      *bool          `json:"is_error,omitempty"`
 	ToolUseId    string         `json:"tool_use_id,omitempty"`
 	CacheControl any            `json:"cache_control,omitempty"`
+	// Extended thinking parts. Only set when the caller (e.g. Cursor)
+	// echoes back prior-turn thinking blocks alongside the new user
+	// message. Without these fields the JSON unmarshal in
+	// tryParseAsClaudeContent would drop the actual thinking text
+	// and emit a structurally incomplete {"type":"thinking"} block,
+	// which Bedrock and Anthropic both reject in multi-turn flows.
+	//
+	//   {type:"thinking",          thinking:"...", signature:"..."}
+	//   {type:"redacted_thinking", data:"..."}
+	Thinking  string `json:"thinking,omitempty"`
+	Signature string `json:"signature,omitempty"`
+	Data      string `json:"data,omitempty"`
 }
 
 type Message struct {
