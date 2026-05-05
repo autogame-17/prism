@@ -481,3 +481,19 @@ export function settingsGetListenAddr(): Promise<ListenAddrInfo | null> {
 export async function settingsSetListenAddr(addr: string): Promise<void> {
   await strict(() => SettingsAPIRaw.SetListenAddr(addr))
 }
+
+export type CloudflareTunnelInfo = {
+  hasToken: boolean
+  hostname: string
+}
+
+export function settingsGetCloudflareTunnel(): Promise<CloudflareTunnelInfo | null> {
+  return safe(
+    async () => (await SettingsAPIRaw.GetCloudflareTunnel()) as unknown as CloudflareTunnelInfo,
+    null,
+  )
+}
+
+export async function settingsSetCloudflareTunnel(token: string, hostname: string): Promise<void> {
+  await strict(() => SettingsAPIRaw.SetCloudflareTunnel(token, hostname))
+}

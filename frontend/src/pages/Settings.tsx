@@ -6,10 +6,12 @@ import {
   openFileDialog,
   saveFileDialog,
   settingsExportToFile,
+  settingsGetCloudflareTunnel,
   settingsGetListenAddr,
   settingsImportFromFile,
   settingsOpenDataDir,
   settingsPaths,
+  settingsSetCloudflareTunnel,
   settingsSetListenAddr,
   systemInfo,
 } from '@/lib/wails'
@@ -26,19 +28,31 @@ export function SettingsPage() {
   const pathsQ = useQuery({ queryKey: ['prism-paths'], queryFn: settingsPaths })
   const infoQ = useQuery({ queryKey: ['prism-info'], queryFn: systemInfo })
   const listenQ = useQuery({ queryKey: ['prism-listen-addr'], queryFn: settingsGetListenAddr })
+  const tunnelQ = useQuery({ queryKey: ['prism-cf-tunnel'], queryFn: settingsGetCloudflareTunnel })
 
   const [theme, setTheme] = useState<Theme>(() => getStoredTheme())
   const [busy, setBusy] = useState(false)
-  // Draft value of the listen-addr input. Synced from the query whenever the
-  // backend responds, but kept locally so typing isn't blown away by refetches.
   const [listenDraft, setListenDraft] = useState<string>('')
   const [listenSaving, setListenSaving] = useState(false)
+  // Named-tunnel inputs. tokenDraft starts empty even when one is
+  // already configured so the actual secret never lives in DOM /
+  // React state — it stays on disk in prism.yaml. The user types
+  // a fresh token to rotate, or clears both fields to disable.
+  const [tunnelTokenDraft, setTunnelTokenDraft] = useState<string>('')
+  const [tunnelHostDraft, setTunnelHostDraft] = useState<string>('')
+  const [tunnelSaving, setTunnelSaving] = useState(false)
 
   useEffect(() => {
     if (listenQ.data) {
       setListenDraft(listenQ.data.configured || listenQ.data.default || '')
     }
   }, [listenQ.data])
+
+  useEffect(() => {
+    if (tunnelQ.data) {
+      setTunnelHostDraft(tunnelQ.data.hostname || '')
+    }
+  }, [tunnelQ.data])
 
   useEffect(() => {
     applyTheme(theme)
@@ -96,6 +110,51 @@ export function SettingsPage() {
       toast.error(t('settings.listen.saveFailed', 'Save failed') + ': ' + msg)
     } finally {
       setListenSaving(false)
+    }
+  }
+
+  // Save / clear named-tunnel config. Two modes:
+  //   - Both fields filled  → switch to named-tunnel mode
+  //   - Both fields empty   → revert to trycloudflare
+  // Anything else is rejected backend-side; we surface the error.
+  // We pass tokenDraft directly even when the user only re-typed the
+  // hostname: the backend treats "" as "leave alone" via the field
+  // identity rule (token+hostname must be both set or both empty),
+  // so the UI forces re-entry of the token whenever rotating either
+  // field. That's a tiny UX cost but keeps DOM free of secrets.
+  const onSaveTunnel = async () => {
+    const token = tunnelTokenDraft.trim()
+    const host = tunnelHostDraft.trim()
+    setTunnelSaving(true)
+    try {
+      await settingsSetCloudflareTunnel(token, host)
+      await qc.invalidateQueries({ queryKey: ['prism-cf-tunnel'] })
+      // Wipe the token from React state immediately after a
+      // successful save so React DevTools / a screen recording
+      // can't pick it up later.
+      setTunnelTokenDraft('')
+      toast.success(t('settings.tunnel.saved', 'Saved. Restart Prism to take effect.'))
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      toast.error(t('settings.tunnel.saveFailed', 'Save failed') + ': ' + msg)
+    } finally {
+      setTunnelSaving(false)
+    }
+  }
+
+  const onClearTunnel = async () => {
+    setTunnelSaving(true)
+    try {
+      await settingsSetCloudflareTunnel('', '')
+      await qc.invalidateQueries({ queryKey: ['prism-cf-tunnel'] })
+      setTunnelTokenDraft('')
+      setTunnelHostDraft('')
+      toast.success(t('settings.tunnel.cleared', 'Cleared. Restart Prism to take effect.'))
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      toast.error(t('settings.tunnel.saveFailed', 'Save failed') + ': ' + msg)
+    } finally {
+      setTunnelSaving(false)
     }
   }
 
@@ -204,6 +263,76 @@ export function SettingsPage() {
                   )}
                 </p>
               )}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">
+            {t('settings.tunnel.title', 'Cloudflare named tunnel (stable URL)')}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-3 text-sm">
+          <p className="text-xs text-muted-foreground">
+            {t(
+              'settings.tunnel.hint',
+              'Trycloudflare gives a fresh random URL on every restart. Switch to a named tunnel to keep one stable hostname forever — requires a Cloudflare account, a domain, and a tunnel token from the Zero Trust dashboard.'
+            )}
+          </p>
+          <div className="grid gap-1">
+            <Label>{t('settings.tunnel.hostname', 'Public hostname')}</Label>
+            <Input
+              placeholder="prism.example.com"
+              value={tunnelHostDraft}
+              onChange={(e) => setTunnelHostDraft(e.target.value)}
+              spellCheck={false}
+              className="font-mono"
+            />
+            <p className="text-[11px] text-muted-foreground">
+              {t(
+                'settings.tunnel.hostnameHint',
+                'Bare host, no scheme. Must match the public hostname you assigned to the tunnel in Cloudflare.'
+              )}
+            </p>
+          </div>
+          <div className="grid gap-1">
+            <Label>{t('settings.tunnel.token', 'Tunnel token')}</Label>
+            <Input
+              type="password"
+              placeholder={
+                tunnelQ.data?.hasToken
+                  ? t('settings.tunnel.tokenPlaceholderConfigured', 'Token already configured — type a new one to rotate')
+                  : t('settings.tunnel.tokenPlaceholder', 'Paste the long token from cloudflared')
+              }
+              value={tunnelTokenDraft}
+              onChange={(e) => setTunnelTokenDraft(e.target.value)}
+              autoComplete="off"
+              spellCheck={false}
+              className="font-mono"
+            />
+            <p className="text-[11px] text-muted-foreground">
+              {t(
+                'settings.tunnel.tokenHint',
+                'Token is stored in prism.yaml and never echoed back to this UI in cleartext.'
+              )}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2 pt-1">
+            <Button onClick={onSaveTunnel} disabled={tunnelSaving}>
+              {tunnelSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {t('settings.tunnel.save', 'Save')}
+            </Button>
+            {tunnelQ.data?.hasToken && (
+              <Button variant="outline" onClick={onClearTunnel} disabled={tunnelSaving}>
+                {t('settings.tunnel.clear', 'Disable named tunnel')}
+              </Button>
+            )}
+            <span className="ml-auto self-center text-xs text-muted-foreground">
+              {tunnelQ.data?.hasToken
+                ? t('settings.tunnel.statusConfigured', 'Named tunnel configured')
+                : t('settings.tunnel.statusOff', 'Using trycloudflare (random URL)')}
+            </span>
           </div>
         </CardContent>
       </Card>

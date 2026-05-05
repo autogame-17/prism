@@ -251,6 +251,26 @@ const en: Dict = {
   'settings.listen.mismatch':
     'Configured address differs from the running one (port likely was busy at startup). Restart Prism to retry.',
 
+  'settings.tunnel.title': 'Cloudflare named tunnel (stable URL)',
+  'settings.tunnel.hint':
+    'Trycloudflare gives a fresh random URL on every restart. Switch to a named tunnel to keep one stable hostname forever — requires a Cloudflare account, a domain, and a tunnel token from the Zero Trust dashboard.',
+  'settings.tunnel.hostname': 'Public hostname',
+  'settings.tunnel.hostnameHint':
+    'Bare host, no scheme. Must match the public hostname you assigned to the tunnel in Cloudflare.',
+  'settings.tunnel.token': 'Tunnel token',
+  'settings.tunnel.tokenPlaceholder': 'Paste the long token from cloudflared',
+  'settings.tunnel.tokenPlaceholderConfigured':
+    'Token already configured — type a new one to rotate',
+  'settings.tunnel.tokenHint':
+    'Token is stored in prism.yaml and never echoed back to this UI in cleartext.',
+  'settings.tunnel.save': 'Save',
+  'settings.tunnel.saved': 'Saved. Restart Prism to take effect.',
+  'settings.tunnel.cleared': 'Cleared. Restart Prism to take effect.',
+  'settings.tunnel.saveFailed': 'Save failed',
+  'settings.tunnel.clear': 'Disable named tunnel',
+  'settings.tunnel.statusConfigured': 'Named tunnel configured',
+  'settings.tunnel.statusOff': 'Using trycloudflare (random URL)',
+
   'onboarding.title': 'Welcome to Prism',
   'onboarding.intro':
     'Prism is your local LLM gateway. It bundles the one-hub core and a Cloudflare tunnel so you can expose OpenAI-compatible endpoints from your desktop with zero cloud setup.',
@@ -514,6 +534,23 @@ const zh: Dict = {
   'settings.listen.copied': '已复制',
   'settings.listen.copyFailed': '复制失败',
   'settings.listen.mismatch': '配置地址与实际绑定不一致（启动时端口可能被占用）。重启 Prism 可重新尝试。',
+
+  'settings.tunnel.title': 'Cloudflare 命名隧道（固定 URL）',
+  'settings.tunnel.hint':
+    'trycloudflare 每次重启都会换新的随机 URL。切换到命名隧道可以拥有永久稳定的域名——需要 Cloudflare 账号、自有域名，以及在 Zero Trust 控制台拿到的 tunnel token。',
+  'settings.tunnel.hostname': '公网域名',
+  'settings.tunnel.hostnameHint': '裸域名，不要带协议。必须与你在 Cloudflare 给该隧道分配的公网域名完全一致。',
+  'settings.tunnel.token': '隧道 token',
+  'settings.tunnel.tokenPlaceholder': '粘贴 cloudflared 给出的长 token',
+  'settings.tunnel.tokenPlaceholderConfigured': '已有 token——填新的可轮换',
+  'settings.tunnel.tokenHint': 'Token 仅存于 prism.yaml，不会再以明文回显到本界面。',
+  'settings.tunnel.save': '保存',
+  'settings.tunnel.saved': '已保存，重启 Prism 后生效。',
+  'settings.tunnel.cleared': '已清除，重启 Prism 后生效。',
+  'settings.tunnel.saveFailed': '保存失败',
+  'settings.tunnel.clear': '关闭命名隧道',
+  'settings.tunnel.statusConfigured': '命名隧道已配置',
+  'settings.tunnel.statusOff': '正在使用 trycloudflare（随机 URL）',
 
   'onboarding.title': '欢迎使用 Prism',
   'onboarding.intro':
