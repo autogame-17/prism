@@ -453,10 +453,7 @@ export function settingsPaths(): Promise<PrismPaths | null> {
 }
 
 export async function settingsOpenDataDir(): Promise<void> {
-  await safe(async () => {
-    await SettingsAPIRaw.OpenDataDir()
-    return undefined
-  }, undefined)
+  await strict(() => SettingsAPIRaw.OpenDataDir())
 }
 
 export function settingsExport(): Promise<unknown> {
@@ -469,4 +466,18 @@ export async function settingsExportToFile(path: string): Promise<void> {
 
 export async function settingsImportFromFile(path: string, replace: boolean): Promise<void> {
   await strict(() => SettingsAPIRaw.ImportFromFile(path, replace))
+}
+
+export type ListenAddrInfo = {
+  configured: string
+  actual: string
+  default: string
+}
+
+export function settingsGetListenAddr(): Promise<ListenAddrInfo | null> {
+  return safe(async () => (await SettingsAPIRaw.GetListenAddr()) as unknown as ListenAddrInfo, null)
+}
+
+export async function settingsSetListenAddr(addr: string): Promise<void> {
+  await strict(() => SettingsAPIRaw.SetListenAddr(addr))
 }

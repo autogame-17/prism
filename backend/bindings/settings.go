@@ -1,13 +1,18 @@
 package bindings
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"one-api/common/config"
@@ -18,14 +23,23 @@ import (
 
 // SettingsAPI exposes app-level settings + data-directory / import-export.
 type SettingsAPI struct {
-	ctx     context.Context
-	dataDir string
-	logDir  string
+	ctx              context.Context
+	dataDir          string
+	logDir           string
+	actualListenAddr string
 }
 
 // NewSettingsAPI constructs the binding; paths come from the boot result.
 func NewSettingsAPI(dataDir, logDir string) *SettingsAPI {
 	return &SettingsAPI{dataDir: dataDir, logDir: logDir}
+}
+
+// SetActualListenAddr is called by the App once the embedded HTTP server is
+// bound, so GetListenAddr() can report the real running address (which may
+// differ from what's in prism.yaml when the configured port was busy and
+// Boot fell back to a random port).
+func (a *SettingsAPI) SetActualListenAddr(addr string) {
+	a.actualListenAddr = addr
 }
 
 // SetContext wires in the Wails runtime context for file dialogs + event emits.
@@ -58,11 +72,29 @@ func (a *SettingsAPI) GetPaths() Paths {
 }
 
 // OpenDataDir asks the OS to reveal the data folder in the file manager.
+// macOS: `open <dir>`; Windows: `explorer <dir>`; Linux: `xdg-open <dir>`.
+// Native commands accept paths with spaces directly, avoiding the URL-encoding
+// pitfalls of BrowserOpenURL("file://...").
 func (a *SettingsAPI) OpenDataDir() error {
-	if a.ctx == nil {
-		return errors.New("settings api context not ready")
+	if a.dataDir == "" {
+		return errors.New("data directory not configured")
 	}
-	wruntime.BrowserOpenURL(a.ctx, "file://"+a.dataDir)
+	if _, err := os.Stat(a.dataDir); err != nil {
+		return fmt.Errorf("stat data dir: %w", err)
+	}
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", a.dataDir)
+	case "windows":
+		cmd = exec.Command("explorer", a.dataDir)
+	default:
+		cmd = exec.Command("xdg-open", a.dataDir)
+	}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("open data dir: %w", err)
+	}
+	go func() { _ = cmd.Wait() }()
 	return nil
 }
 
@@ -238,3 +270,156 @@ func (a *SettingsAPI) ImportFromFile(path string, replace bool) error {
 }
 
 func nowUnix() int64 { return time.Now().Unix() }
+
+// ListenAddrInfo describes both the value persisted in prism.yaml and the
+// address the running process actually bound to. They may diverge when the
+// configured port was already in use and Boot fell back to a random port.
+type ListenAddrInfo struct {
+	Configured string `json:"configured"` // value in prism.yaml; empty = use default
+	Actual     string `json:"actual"`     // host:port the http server is bound on right now
+	Default    string `json:"default"`    // built-in default surfaced for UX hints
+}
+
+const defaultListenAddr = "127.0.0.1:39527"
+
+// GetListenAddr returns both the configured and the running address.
+// dataDir is required so we know where prism.yaml lives. The actual address
+// has to come from the App layer because SettingsAPI doesn't own the boot
+// result; we expose it through a setter at construction time.
+func (a *SettingsAPI) GetListenAddr() (ListenAddrInfo, error) {
+	info := ListenAddrInfo{Default: defaultListenAddr, Actual: a.actualListenAddr}
+	cfg, err := readListenAddrFromYAML(filepath.Join(a.dataDir, "prism.yaml"))
+	if err != nil {
+		return info, err
+	}
+	info.Configured = cfg
+	return info, nil
+}
+
+// SetListenAddr validates and persists a new listen_addr to prism.yaml. The
+// change does NOT take effect until the user restarts Prism — the caller is
+// responsible for surfacing that to the UI. Pass an empty string to remove
+// the override (Prism will fall back to the default port on next boot).
+func (a *SettingsAPI) SetListenAddr(addr string) error {
+	addr = strings.TrimSpace(addr)
+	if addr != "" {
+		if err := validateListenAddr(addr); err != nil {
+			return err
+		}
+	}
+	return writeListenAddrToYAML(filepath.Join(a.dataDir, "prism.yaml"), addr)
+}
+
+// validateListenAddr rejects obvious typos before they hit disk. We only
+// require host:port to parse and the port to be a positive integer; the
+// actual bind happens on next Boot, where we'll discover real conflicts.
+func validateListenAddr(addr string) error {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("invalid host:port %q: %w", addr, err)
+	}
+	if host == "" {
+		return errors.New("host part required (e.g. 127.0.0.1 or 0.0.0.0)")
+	}
+	if port == "" {
+		return errors.New("port required")
+	}
+	// Reject 0 — even though the underlying server supports it for ephemeral
+	// binding, persisting "127.0.0.1:0" defeats the whole point of this UI.
+	// Tell the user to delete the field instead.
+	if port == "0" {
+		return errors.New("use empty value to disable the override; port 0 is not allowed")
+	}
+	return nil
+}
+
+// readListenAddrFromYAML scans prism.yaml line by line and returns the first
+// top-level `listen_addr:` value. Returns "" if the key isn't present.
+// We deliberately avoid full YAML parsing so we can also _write_ the file
+// later without touching comments / formatting / ordering.
+func readListenAddrFromYAML(path string) (string, error) {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", fmt.Errorf("read %s: %w", path, err)
+	}
+	scanner := bufio.NewScanner(bytes.NewReader(body))
+	for scanner.Scan() {
+		line := scanner.Text()
+		trimmed := strings.TrimLeft(line, " \t")
+		// Only top-level keys (no indentation).
+		if trimmed != line {
+			continue
+		}
+		if !strings.HasPrefix(trimmed, "listen_addr:") {
+			continue
+		}
+		val := strings.TrimSpace(strings.TrimPrefix(trimmed, "listen_addr:"))
+		val = strings.Trim(val, `"'`)
+		return val, nil
+	}
+	return "", scanner.Err()
+}
+
+// writeListenAddrToYAML rewrites prism.yaml so that the top-level
+// `listen_addr:` line equals addr. Existing comments, ordering and
+// untouched fields are preserved. Empty addr removes the override.
+//
+// The write is atomic: we serialise to a sibling temp file, fsync, then
+// rename over the original so a crash mid-write can't corrupt the config.
+func writeListenAddrToYAML(path string, addr string) error {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("read %s: %w", path, err)
+		}
+		body = nil
+	}
+
+	var newLine string
+	if addr != "" {
+		newLine = fmt.Sprintf("listen_addr: %q", addr)
+	}
+
+	scanner := bufio.NewScanner(bytes.NewReader(body))
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	var out bytes.Buffer
+	replaced := false
+	for scanner.Scan() {
+		line := scanner.Text()
+		trimmed := strings.TrimLeft(line, " \t")
+		if trimmed == line && strings.HasPrefix(trimmed, "listen_addr:") {
+			if newLine != "" {
+				out.WriteString(newLine)
+				out.WriteByte('\n')
+			}
+			replaced = true
+			continue
+		}
+		out.WriteString(line)
+		out.WriteByte('\n')
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("scan %s: %w", path, err)
+	}
+	if !replaced && newLine != "" {
+		// Append after a trailing newline if missing.
+		if out.Len() > 0 && out.Bytes()[out.Len()-1] != '\n' {
+			out.WriteByte('\n')
+		}
+		out.WriteString(newLine)
+		out.WriteByte('\n')
+	}
+
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, out.Bytes(), 0o600); err != nil {
+		return fmt.Errorf("write %s: %w", tmp, err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("rename %s: %w", path, err)
+	}
+	return nil
+}

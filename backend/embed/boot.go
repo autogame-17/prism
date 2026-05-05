@@ -136,9 +136,21 @@ func Boot(opts BootOptions) (*BootResult, error) {
 	router.SetDashboardRouter(engine)
 	router.SetRelayRouter(engine)
 
+	// Resolve the bind address. Priority:
+	//   1. Explicit BootOptions.ListenAddr (used by tests / hosting code)
+	//   2. listen_addr in prism.yaml
+	//   3. The default 127.0.0.1:39527
+	//
+	// We deliberately default to a fixed port so external clients (Cursor /
+	// curl scripts / IDE extensions) can pin one URL across restarts. If
+	// that port is busy we transparently fall back to a random one and log
+	// a warning, so a stale Prism / port collision can never block startup.
 	listenAddr := opts.ListenAddr
 	if listenAddr == "" {
-		listenAddr = "127.0.0.1:0"
+		listenAddr = viper.GetString("listen_addr")
+	}
+	if listenAddr == "" {
+		listenAddr = "127.0.0.1:39527"
 	}
 	srv := &http.Server{
 		Addr:              listenAddr,
@@ -146,10 +158,14 @@ func Boot(opts BootOptions) (*BootResult, error) {
 		ReadHeaderTimeout: 15 * time.Second,
 	}
 
-	// Listen synchronously so we know the actual port before returning.
 	ln, err := listenTCP(listenAddr)
 	if err != nil {
-		return nil, fmt.Errorf("listen %s: %w", listenAddr, err)
+		fallback := "127.0.0.1:0"
+		logger.SysError(fmt.Sprintf("listen %s failed (%v); falling back to %s", listenAddr, err, fallback))
+		ln, err = listenTCP(fallback)
+		if err != nil {
+			return nil, fmt.Errorf("listen %s: %w", fallback, err)
+		}
 	}
 	srv.Addr = ln.Addr().String()
 
@@ -253,6 +269,11 @@ user_token_secret: %q
 hashids_salt: %q
 
 memory_cache_enabled: false
+
+# Local HTTP server bind address. Keep the port stable so external clients
+# (Cursor / IDE extensions) can pin one URL across Prism restarts. Set to
+# "127.0.0.1:0" if you want a random ephemeral port instead.
+listen_addr: "127.0.0.1:39527"
 
 global:
   api_rate_limit: 1800

@@ -10,6 +10,7 @@ node_modules/
 dist/
 dist-public/
 .release-backup/
+.evolver-binary-experiment/
 
 # Generated TypeScript build artefacts
 frontend/tsconfig*.tsbuildinfo

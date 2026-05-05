@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"prism/backend/notify"
 	"prism/backend/tunnel"
 
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -19,6 +20,12 @@ type TunnelAPI struct {
 	mu     sync.Mutex
 	logs   []string
 	maxLog int
+
+	// lastAnnouncedURL remembers the URL we already announced to the
+	// user so the cold-boot URL is silent and only genuine rotations
+	// trigger the clipboard / system-notification flow.
+	urlMu            sync.Mutex
+	lastAnnouncedURL string
 }
 
 // NewTunnelAPI constructs the binding with cloudflared already configured.
@@ -29,6 +36,7 @@ func NewTunnelAPI(mgr *tunnel.Cloudflared) *TunnelAPI {
 			wruntime.EventsEmit(api.ctx, "tunnel.url", url)
 			wruntime.EventsEmit(api.ctx, "tunnel.status", mgr.Snapshot())
 		}
+		api.maybeAnnounceURL(url)
 	}
 	mgr.LogWriter = logSink{api: api}
 	return api
@@ -112,4 +120,42 @@ func (a *TunnelAPI) BaseURL() string {
 		return ""
 	}
 	return fmt.Sprintf("%s/v1", snap.URL)
+}
+
+// maybeAnnounceURL reacts to OnURL callbacks from the cloudflared manager.
+// Each genuine rotation (i.e. the URL is not empty AND differs from the
+// last URL we already announced) is treated as an event the user almost
+// certainly cares about: we copy the OpenAI-compatible base URL to the
+// clipboard and surface a native notification, so even with the Prism
+// window hidden in the menu bar they have everything they need to fix
+// their client.
+//
+// The first URL after a cold boot is announced too (lastAnnouncedURL is
+// empty), but ONLY via the in-window toast wired up in App.tsx — the
+// in-window watcher debounces cold-boot itself. Here we don't have to
+// duplicate that logic because the OS-level notification on first URL
+// is actually useful: it confirms cloudflared came up successfully.
+func (a *TunnelAPI) maybeAnnounceURL(url string) {
+	if url == "" {
+		return
+	}
+	a.urlMu.Lock()
+	previous := a.lastAnnouncedURL
+	a.lastAnnouncedURL = url
+	a.urlMu.Unlock()
+	if previous == url {
+		return
+	}
+	baseURL := url + "/v1"
+	title := "Prism tunnel URL ready"
+	if previous != "" {
+		title = "Prism tunnel URL changed"
+	}
+	// Run the OS-level helpers off the cloudflared log-parser goroutine
+	// so that a slow / hung notify-send / xclip / powershell never delays
+	// the next tunnel.url emit or backs up cloudflared's stdout buffer.
+	go func() {
+		notify.Copy(baseURL)
+		notify.Show(title, baseURL+" — copied to clipboard")
+	}()
 }
