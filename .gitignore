@@ -39,6 +39,9 @@ prism.yaml
 resources/cloudflared/**/cloudflared
 resources/cloudflared/**/cloudflared.exe
 
+# Wails NSIS auto-fetched WebView2 setup
+build/windows/installer/tmp/
+
 # CGO / Go tooling caches (defensive)
 *.o
 *.a

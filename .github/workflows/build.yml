@@ -1,9 +1,6 @@
 name: build
 
 on:
-  push:
-    branches: [main]
-    tags: ['v*']
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -19,15 +16,12 @@ jobs:
           - name: macOS (universal)
             os: macos-14
             platform: darwin/universal
-            artifact: Prism.app
           - name: Windows (amd64)
             os: windows-2022
             platform: windows/amd64
-            artifact: Prism-amd64-installer.exe
           - name: Linux (amd64)
             os: ubuntu-22.04
             platform: linux/amd64
-            artifact: Prism
     steps:
       - uses: actions/checkout@v4
 
@@ -55,6 +49,10 @@ jobs:
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
+      - name: Fetch cloudflared binaries
+        shell: bash
+        run: ./scripts/fetch_cloudflared.sh
+
       - name: Install frontend deps
         working-directory: frontend
         run: pnpm install --frozen-lockfile=false
@@ -62,25 +60,10 @@ jobs:
       - name: Build (${{ matrix.platform }})
         run: wails build -platform ${{ matrix.platform }} -clean
 
-      - name: Package macOS dmg
-        if: runner.os == 'macOS'
-        run: |
-          mkdir -p build/dist
-          hdiutil create -volname "Prism" -srcfolder build/bin/Prism.app -ov -format UDZO build/dist/Prism-${{ runner.arch }}.dmg
-
-      - name: Package Windows installer
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          mkdir -p build/dist
-          wails build -platform ${{ matrix.platform }} -nsis -clean
-          cp build/bin/Prism-amd64-installer.exe build/dist/ || true
-
-      - name: Upload artifacts
+      - name: Upload build artefacts (CI only)
         uses: actions/upload-artifact@v4
         with:
           name: prism-${{ runner.os }}-${{ runner.arch }}
-          path: |
-            build/bin/
-            build/dist/
+          path: build/bin/
+          retention-days: 7
           if-no-files-found: warn

@@ -10,7 +10,6 @@
     "public.manifest.json",
     "scripts/build_public.sh",
     "scripts/publish_public.sh",
-    ".github/workflows/build.yml",
     ".public-only/**",
     "docs/internal/**",
     "*.draft.md"
