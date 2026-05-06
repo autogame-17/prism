@@ -1,0 +1,78 @@
+name: build
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS (universal)
+            os: macos-14
+            platform: darwin/universal
+          - name: Windows (amd64)
+            os: windows-2022
+            platform: windows/amd64
+          - name: Linux (amd64)
+            os: ubuntu-22.04
+            platform: linux/amd64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: Install Linux WebKitGTK deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      - name: Fetch cloudflared binaries
+        shell: bash
+        run: ./scripts/fetch_cloudflared.sh
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile=false
+
+      - name: Build (${{ matrix.platform }})
+        shell: bash
+        run: |
+          # On Linux runners we need the webkit2_41 build tag because Ubuntu
+          # 22.04+ ships libwebkit2gtk-4.1 instead of 4.0; Wails picks the
+          # right pkg-config target via this tag.
+          if [[ "${{ runner.os }}" == "Linux" ]]; then
+            wails build -platform "${{ matrix.platform }}" -tags webkit2_41 -clean
+          else
+            wails build -platform "${{ matrix.platform }}" -clean
+          fi
+
+      - name: Upload build artefacts (CI only)
+        uses: actions/upload-artifact@v4
+        with:
+          name: prism-${{ runner.os }}-${{ runner.arch }}
+          path: build/bin/
+          retention-days: 7
+          if-no-files-found: warn
