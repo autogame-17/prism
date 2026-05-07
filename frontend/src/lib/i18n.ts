@@ -135,6 +135,7 @@ const en: Dict = {
   'tokens.createFailed': 'Create failed',
   'tokens.deleteFailed': 'Delete failed',
   'tokens.renameFailed': 'Rename failed',
+  'tokens.toggleFailed': 'Toggle failed',
   'tokens.status.expired': 'Expired',
   'tokens.status.depleted': 'Depleted',
 
@@ -420,6 +421,7 @@ const zh: Dict = {
   'tokens.createFailed': '创建失败',
   'tokens.deleteFailed': '删除失败',
   'tokens.renameFailed': '重命名失败',
+  'tokens.toggleFailed': '切换状态失败',
   'tokens.status.expired': '已过期',
   'tokens.status.depleted': '已用尽',
 

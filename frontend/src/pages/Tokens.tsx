@@ -108,6 +108,7 @@ export function TokensPage() {
   const toggleMu = useMutation({
     mutationFn: (id: number) => tokensToggle(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['tokens'] }),
+    onError: (e: unknown) => toast.error(t('tokens.toggleFailed') + ': ' + String(e)),
   })
 
   const renameMu = useMutation({
