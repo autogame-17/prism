@@ -44,7 +44,7 @@ var assets embed.FS
 //go:embed build/trayicon-template.png
 var trayIconPNG []byte
 
-const appVersion = "0.1.0"
+const appVersion = "0.1.3"
 
 func main() {
 	app := NewApp()
