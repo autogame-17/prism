@@ -206,6 +206,8 @@ const en: Dict = {
   'logs.system.clear': 'Clear',
   'logs.system.autoscroll': 'Auto-scroll',
   'logs.system.empty': 'No log entries yet.',
+  'logs.system.copyAll': 'Copy all',
+  'logs.system.copyDone': 'Copied {n} lines.',
 
   'settings.title': 'Settings',
   'settings.desc': 'Prism keeps its database, config, and logs under a user config directory. Back them up here or open the folder to poke around.',
@@ -496,6 +498,8 @@ const zh: Dict = {
   'logs.system.clear': '清空',
   'logs.system.autoscroll': '自动滚动',
   'logs.system.empty': '暂无日志条目。',
+  'logs.system.copyAll': '复制全部',
+  'logs.system.copyDone': '已复制 {n} 行日志。',
 
   'settings.title': '设置',
   'settings.desc': 'Prism 会在用户配置目录下维护数据库、配置和日志。可以在此做备份或打开目录查看。',

@@ -115,6 +115,18 @@ func Boot(opts BootOptions) (*BootResult, error) {
 	common.InitTokenEncoders()
 	requester.InitHttpClient()
 
+	// Prism is a single-user desktop deployment, so the upstream one-hub's
+	// per-user pre-quota check is a footgun: out of the box root.Quota is
+	// only 1e8, every relay call decrements it, and once it's drained the
+	// proxy starts replying 402 "user quota is not enough" even though the
+	// user (correctly) configured their token as unlimited. Token unlimited
+	// only bypasses the *token* quota — the user-level Quota field is a
+	// separate budget on the User row that token unlimited does not waive.
+	// On every boot we top the root user back up to ~2e9 so the desktop
+	// stops gating its own owner. This is a no-op on hosted deployments
+	// because Prism is the only entry point that calls Boot.
+	ensureRootUnlimited()
+
 	// Build the HTTP server.
 	gin.SetMode(viper.GetString("gin_mode"))
 	engine := gin.New()
@@ -190,6 +202,34 @@ func Boot(opts BootOptions) (*BootResult, error) {
 		TunnelToken:    viper.GetString("cloudflare.tunnel_token"),
 		TunnelHostname: viper.GetString("cloudflare.tunnel_hostname"),
 	}, nil
+}
+
+// ensureRootUnlimited bumps every RootUser row's Quota to a value high
+// enough to never decrement to zero in normal desktop usage. Called from
+// Boot after model.SetupDB so the row exists. No-op on a fresh DB where
+// createRootAccountIfNeed already inserted the row with this same quota
+// (we just keep an existing row from drifting due to old PreQuota debits).
+//
+// Why "ensure" and not "set once": users on 0.1.0..0.1.2 already have a
+// drained Quota in their persisted SQLite, so a one-shot init at first
+// boot would not unstick them. Bumping on every boot is cheap (single
+// indexed UPDATE) and idempotent.
+func ensureRootUnlimited() {
+	if model.DB == nil {
+		return
+	}
+	const desktopRootQuota = 2_000_000_000 // headroom of ~2e9 below int32 ceiling
+	res := model.DB.Model(&model.User{}).
+		Where("role = ?", config.RoleRootUser).
+		Where("quota < ?", desktopRootQuota).
+		Update("quota", desktopRootQuota)
+	if res.Error != nil {
+		logger.SysError(fmt.Sprintf("ensure root unlimited: %v", res.Error))
+		return
+	}
+	if res.RowsAffected > 0 {
+		logger.SysLog(fmt.Sprintf("desktop mode: lifted %d root user(s) to unlimited quota", res.RowsAffected))
+	}
 }
 
 // Shutdown attempts to gracefully stop the embedded server and flush the DB.

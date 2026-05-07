@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Loader2, RefreshCw, Terminal } from 'lucide-react'
+import { Copy, Loader2, RefreshCw, Terminal } from 'lucide-react'
 import {
   onEvent,
   requestLogs,
@@ -328,7 +328,7 @@ function BodyBlock({ title, body, onCopy }: { title: string; body: string; onCop
           Copy
         </Button>
       </div>
-      <pre className="max-h-[28vh] overflow-auto whitespace-pre-wrap break-all rounded-md border border-border/60 bg-[#0b0e14] p-2 font-mono text-[11px] leading-5 text-slate-200 prism-scroll">
+      <pre className="prism-selectable prism-scroll max-h-[28vh] overflow-auto whitespace-pre-wrap break-all rounded-md border border-border/60 bg-[#0b0e14] p-2 font-mono text-[11px] leading-5 text-slate-200">
         {formatted || '—'}
       </pre>
     </div>
@@ -482,7 +482,7 @@ function RequestLogRowItem({ row }: { row: RequestLogRow }) {
       {open && row.content && (
         <TableRow>
           <TableCell colSpan={8} className="bg-muted/30">
-            <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all text-xs text-muted-foreground prism-scroll">
+            <pre className="prism-selectable prism-scroll max-h-48 overflow-auto whitespace-pre-wrap break-all text-xs text-muted-foreground">
               {row.content}
             </pre>
           </TableCell>
@@ -526,6 +526,34 @@ function SystemLogsView() {
     if (el) el.scrollTop = el.scrollHeight
   }, [lines, paused])
 
+  // Render the buffered log lines into a single plain-text blob so the
+  // "Copy all" button hands the user something useful regardless of which
+  // text the renderer happens to have selected. Memoised because `lines`
+  // can grow to 1000 entries and toString-ing it on every keystroke
+  // elsewhere would be wasteful.
+  const plainText = useMemo(
+    () =>
+      lines
+        .map((l) => `${new Date(l.timestamp).toLocaleTimeString()} ${l.level} ${l.message}`)
+        .join('\n'),
+    [lines]
+  )
+
+  const copyAll = async () => {
+    if (!plainText) {
+      toast.error(t('logs.system.empty'))
+      return
+    }
+    try {
+      await navigator.clipboard.writeText(plainText)
+      toast.success(
+        t('logs.system.copyDone').replace('{n}', String(lines.length))
+      )
+    } catch {
+      toast.error(t('common.copyFailed'))
+    }
+  }
+
   return (
     <div className="flex flex-1 flex-col gap-3 overflow-hidden">
       <div className="flex items-center gap-2">
@@ -539,10 +567,16 @@ function SystemLogsView() {
         <Button size="sm" variant="outline" onClick={() => setLines([])}>
           {t('logs.system.clear')}
         </Button>
+        <div className="ml-auto">
+          <Button size="sm" variant="outline" onClick={copyAll} disabled={lines.length === 0}>
+            <Copy className="mr-1 h-3.5 w-3.5" />
+            {t('logs.system.copyAll')}
+          </Button>
+        </div>
       </div>
       <div
         ref={scrollRef}
-        className="flex-1 overflow-auto rounded-md border border-border/60 bg-[#0b0e14] p-3 font-mono text-xs text-green-200/90 prism-scroll"
+        className="prism-selectable prism-scroll flex-1 overflow-auto rounded-md border border-border/60 bg-[#0b0e14] p-3 font-mono text-xs text-green-200/90"
       >
         {lines.length === 0 ? (
           <div className="text-muted-foreground">{t('logs.system.empty')}</div>

@@ -78,6 +78,20 @@
   }
 }
 
+/* Wails v2's webview defaults the whole window to user-select: none so a
+ * desktop app feels native (stops the renderer from caret-flickering when
+ * dragging the title bar). That bites every text-heavy panel — request
+ * bodies, trace responses, the system-log stream — because the user
+ * cannot copy any of it. Override on diagnostic surfaces only via
+ * .prism-selectable so chrome (sidebar / table cells / buttons) keep the
+ * native feel. */
+.prism-selectable,
+.prism-selectable * {
+  -webkit-user-select: text;
+  user-select: text;
+  cursor: text;
+}
+
 /* Thin scrollbar for log views */
 .prism-scroll::-webkit-scrollbar {
   width: 8px;
