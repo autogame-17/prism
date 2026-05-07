@@ -3,6 +3,7 @@ package bindings
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"one-api/common/config"
@@ -289,12 +290,27 @@ type TestResult struct {
 }
 
 // Test runs a live provider ping for the given channel and optional model.
-// Falls back to the channel's TestModel when modelName is empty.
+//
+// Behaviour:
+//   - When the caller supplies a model name (or the channel has TestModel
+//     configured), runs the original chat/embedding/image ping against
+//     that model.
+//   - When neither is set, falls back to GetModelList (GET /v1/models for
+//     OpenAI-compatible providers) so the user can verify connectivity
+//     and credentials without first having to guess a valid model name.
+//     The returned message includes a preview of the upstream model list.
+//   - If the provider has no model-list endpoint (e.g. Bedrock), surfaces
+//     an actionable error asking the user to fill the Test model field.
 func (a *ChannelsAPI) Test(id int, modelName string) (*TestResult, error) {
 	ch, err := model.GetChannelById(id)
 	if err != nil {
 		return nil, err
 	}
+
+	if modelName == "" && ch.TestModel == "" {
+		return testChannelViaListModels(ch), nil
+	}
+
 	start := time.Now()
 	openaiErr, testErr := controller.TestChannelOnce(ch, modelName)
 	elapsed := int(time.Since(start).Milliseconds())
@@ -316,6 +332,54 @@ func (a *ChannelsAPI) Test(id int, modelName string) (*TestResult, error) {
 		ResponseTime: elapsed,
 		Message:      fmt.Sprintf("channel %d (%s) ok in %dms", ch.Id, ch.Name, elapsed),
 	}, nil
+}
+
+// testChannelViaListModels runs the GetModelList fallback and renders a
+// human-readable TestResult. Always returns a result (never an error) so
+// the UI consistently sees a Success flag plus a message.
+func testChannelViaListModels(ch *model.Channel) *TestResult {
+	start := time.Now()
+	models, err := controller.TestChannelListModels(ch)
+	elapsed := int(time.Since(start).Milliseconds())
+	ch.UpdateResponseTime(int64(elapsed))
+
+	if err != nil {
+		var msg string
+		if errors.Is(err, controller.ErrModelListNotSupported) {
+			// Bedrock / Vertex-style providers: no /v1/models. Tell the
+			// user to fill the Test model field instead of misleading
+			// them into thinking the channel itself is broken.
+			msg = "please fill the Test model field — this provider does not expose a model-list endpoint"
+		} else {
+			msg = err.Error()
+		}
+		return &TestResult{
+			Success:      false,
+			ResponseTime: elapsed,
+			Message:      fmt.Sprintf("channel %d (%s) failed: %s", ch.Id, ch.Name, msg),
+		}
+	}
+
+	preview := renderModelListPreview(models)
+	return &TestResult{
+		Success:      true,
+		ResponseTime: elapsed,
+		Message:      fmt.Sprintf("channel %d (%s) ok in %dms %s", ch.Id, ch.Name, elapsed, preview),
+	}
+}
+
+// renderModelListPreview produces a compact summary of the upstream model
+// list suitable for embedding in a toast. Caps at 5 names so a verbose
+// upstream (OpenRouter ships >300) does not overflow the UI.
+func renderModelListPreview(models []string) string {
+	const maxPreview = 5
+	if len(models) == 0 {
+		return "(provider returned empty model list)"
+	}
+	if len(models) <= maxPreview {
+		return fmt.Sprintf("(%d models: %s)", len(models), strings.Join(models, ", "))
+	}
+	return fmt.Sprintf("(%d models, e.g. %s)", len(models), strings.Join(models[:maxPreview], ", "))
 }
 
 func channelFromPayload(p ChannelPayload) *model.Channel {

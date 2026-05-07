@@ -153,6 +153,43 @@ func TestChannelOnce(channel *model.Channel, testModel string) (openaiErr *types
 	return nil, nil
 }
 
+// TestChannelListModels probes connectivity by calling the provider's
+// GetModelList (typically GET /v1/models). Used as a fallback for the UI's
+// Test button when no test model is configured: a successful list call
+// proves the BaseURL and credentials are usable without forcing the user
+// to guess a valid model name. Returns the upstream model list on success.
+//
+// Providers that do not implement ModelListInterface (e.g. AWS Bedrock,
+// which has no equivalent endpoint) yield ErrModelListNotSupported and the
+// caller should surface a "fill the Test model field" hint to the user.
+func TestChannelListModels(channel *model.Channel) ([]string, error) {
+	channel.SetProxy()
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	req, err := http.NewRequest("GET", "/v1/models", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	c.Request = req
+
+	provider := providers.GetProvider(channel, c)
+	if provider == nil {
+		return nil, errors.New("channel not implemented")
+	}
+	listProvider, ok := provider.(providers_base.ModelListInterface)
+	if !ok {
+		return nil, ErrModelListNotSupported
+	}
+	return listProvider.GetModelList()
+}
+
+// ErrModelListNotSupported is returned by TestChannelListModels when the
+// channel's provider has no model-list endpoint (e.g. Bedrock). Callers
+// match it via errors.Is to surface a provider-specific UX hint.
+var ErrModelListNotSupported = errors.New("provider does not support listing models")
+
 func getModelType(modelName string) string {
 	if noSupportRegex.MatchString(modelName) {
 		return "noSupport"
