@@ -106,9 +106,13 @@ function TracesView() {
 
   const purgeAll = async () => {
     if (!confirm(t('logs.traces.purgeConfirm'))) return
-    const n = await tracesPurgeOlderThan(0)
-    toast.success(t('logs.traces.purgeDone').replace('{n}', String(n)))
-    qc.invalidateQueries({ queryKey: ['traces'] })
+    try {
+      const n = await tracesPurgeOlderThan(0)
+      toast.success(t('logs.traces.purgeDone').replace('{n}', String(n)))
+      qc.invalidateQueries({ queryKey: ['traces'] })
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    }
   }
 
   return (

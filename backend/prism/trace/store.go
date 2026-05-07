@@ -168,6 +168,12 @@ func Get(ctx context.Context, id int64) (*Entry, error) {
 
 // Purge deletes entries older than the given unix timestamp. Returns the
 // number of rows deleted. Use 0 to wipe everything (explicit).
+//
+// GORM v2 refuses any Delete that has no WHERE clause (ErrMissingWhereClause)
+// to guard against accidental whole-table wipes. The "purge everything" path
+// is intentional, so we pass a tautological WHERE to satisfy that check
+// instead of flipping AllowGlobalUpdate (which would unsafely apply session-
+// wide and let unrelated future bugs nuke the table).
 func Purge(ctx context.Context, olderThanUnix int64) (int64, error) {
 	if onehubmodel.DB == nil {
 		return 0, errors.New("onehub DB is not ready")
@@ -175,6 +181,8 @@ func Purge(ctx context.Context, olderThanUnix int64) (int64, error) {
 	q := onehubmodel.DB.WithContext(ctx)
 	if olderThanUnix > 0 {
 		q = q.Where("created_at < ?", olderThanUnix)
+	} else {
+		q = q.Where("1 = 1")
 	}
 	res := q.Delete(&Entry{})
 	return res.RowsAffected, res.Error
