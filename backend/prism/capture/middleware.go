@@ -8,7 +8,6 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"net/http"
 	"strings"
 	"time"
 
@@ -214,7 +213,10 @@ func safeString(b []byte) string {
 // (OpenAI's {"error":{"message":...}}, plain text, or SSE).
 func extractError(body []byte, contentType string) string {
 	if len(body) == 0 {
-		return http.StatusText(0)
+		// http.StatusText(0) returns "" which is what the caller used to
+		// get; be explicit so an empty error body still shows something
+		// in the Logs UI instead of a blank ErrorMessage column.
+		return "(empty response body)"
 	}
 	if strings.Contains(contentType, "json") {
 		if msg := gjson.GetBytes(body, "error.message").String(); msg != "" {
