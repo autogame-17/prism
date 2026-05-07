@@ -244,9 +244,25 @@ func (c *Cloudflared) Stop() error {
 }
 
 // Rotate stops and restarts the tunnel, returning the new URL.
+//
+// Stop() sends SIGTERM but the wait goroutine clearing c.cmd back to nil
+// is what really gates a clean restart — Start() guards on `c.cmd != nil`
+// and would otherwise return "already running" if we race the wait
+// goroutine. Poll until the wait goroutine has reaped the process (or
+// give up after 5s, which means cloudflared ignored SIGTERM and
+// Stop()'s 3s Kill path is still in flight).
 func (c *Cloudflared) Rotate(timeout time.Duration) (string, error) {
 	_ = c.Stop()
-	time.Sleep(300 * time.Millisecond)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		c.mu.Lock()
+		gone := c.cmd == nil
+		c.mu.Unlock()
+		if gone {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 	return c.StartAndWaitURL(timeout)
 }
 
