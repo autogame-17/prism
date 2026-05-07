@@ -92,6 +92,10 @@ const en: Dict = {
   'channels.editor.baseUrl': 'Base URL',
   'channels.editor.other': 'Other',
   'channels.editor.models': 'Models (comma separated)',
+  'channels.editor.modelsHelp':
+    'Models that requests on this channel are allowed to use. Add custom aliases (e.g. cursor-opus-4-7) here so the distributor can match them; pair with Model Mapping if upstream needs a different name.',
+  'channels.editor.fetchModels': 'Fetch from Base URL',
+  'channels.editor.fetchModelsDone': 'Pulled {n} models from upstream.',
   'channels.editor.group': 'Group',
   'channels.editor.testModel': 'Test model',
   'channels.editor.proxy': 'Outbound proxy',
@@ -378,6 +382,10 @@ const zh: Dict = {
   'channels.editor.baseUrl': 'Base URL',
   'channels.editor.other': '其它参数',
   'channels.editor.models': '支持的模型(逗号分隔)',
+  'channels.editor.modelsHelp':
+    '本渠道允许请求使用的模型名。需要在这里加入自定义别名（如 cursor-opus-4-7），分发器才能命中；如果上游识别的是另一个名字，配合"模型映射"翻译。',
+  'channels.editor.fetchModels': '从 Base URL 拉取',
+  'channels.editor.fetchModelsDone': '已从上游拉取 {n} 个模型。',
   'channels.editor.group': '分组',
   'channels.editor.testModel': '测试模型',
   'channels.editor.proxy': '出站代理',

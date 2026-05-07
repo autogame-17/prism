@@ -5,6 +5,7 @@ import { Loader2, Plus, RefreshCw, Pencil, Trash2, Play, Power } from 'lucide-re
 import {
   channelsCreate,
   channelsDelete,
+  channelsFetchModels,
   channelsList,
   channelsTest,
   channelsToggle,
@@ -349,6 +350,32 @@ function ChannelEditorDialog({
   const update = <K extends keyof ChannelFormState>(key: K, value: ChannelFormState[K]) =>
     setForm({ ...form, [key]: value })
 
+  // fetchModelsMu probes the upstream's /v1/models for the *currently edited*
+  // form (without saving the channel). On success we merge the pulled names
+  // with whatever the user has already typed and dedupe — typing custom
+  // aliases like "cursor-opus-4-7" alongside the upstream list is the
+  // common case for Cursor / Codex / etc clients.
+  const fetchModelsMu = useMutation({
+    mutationFn: () => channelsFetchModels(form),
+    onSuccess: (models) => {
+      const existing = form.models
+        .split(/[\s,]+/)
+        .map((s) => s.trim())
+        .filter(Boolean)
+      const seen = new Set<string>()
+      const merged: string[] = []
+      for (const name of [...existing, ...models]) {
+        if (!seen.has(name)) {
+          seen.add(name)
+          merged.push(name)
+        }
+      }
+      setForm({ ...form, models: merged.join(',') })
+      toast.success(t('channels.editor.fetchModelsDone').replace('{n}', String(models.length)))
+    },
+    onError: (err: unknown) => toast.error(err instanceof Error ? err.message : String(err)),
+  })
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-[min(90vw,640px)] max-w-[90vw] overflow-hidden">
@@ -425,7 +452,23 @@ function ChannelEditorDialog({
           )}
 
           <div className="min-w-0 space-y-1">
-            <Label>{t('channels.editor.models')}</Label>
+            <div className="flex items-center justify-between gap-2">
+              <Label>{t('channels.editor.models')}</Label>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => fetchModelsMu.mutate()}
+                disabled={fetchModelsMu.isPending}
+              >
+                {fetchModelsMu.isPending ? (
+                  <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="mr-1 h-3.5 w-3.5" />
+                )}
+                {t('channels.editor.fetchModels')}
+              </Button>
+            </div>
             <Textarea
               rows={3}
               value={form.models}
@@ -433,6 +476,9 @@ function ChannelEditorDialog({
               placeholder="gpt-4o-mini,gpt-4o"
               className="w-full"
             />
+            <p className="text-xs text-muted-foreground">
+              {t('channels.editor.modelsHelp')}
+            </p>
           </div>
 
           <div className="grid grid-cols-3 gap-3">

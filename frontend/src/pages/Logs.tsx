@@ -109,6 +109,14 @@ function TracesView() {
     try {
       const n = await tracesPurgeOlderThan(0)
       toast.success(t('logs.traces.purgeDone').replace('{n}', String(n)))
+      // Optimistically blank the visible list so the user sees the wipe
+      // immediately, even if a chatty client (e.g. Cursor) is still
+      // generating new traces and the 5s refetchInterval would otherwise
+      // refill the table before they could verify the purge worked.
+      qc.setQueriesData({ queryKey: ['traces'] }, (old: unknown) => {
+        const prev = (old ?? {}) as { items?: unknown[]; total?: number; page?: number; pageSize?: number }
+        return { ...prev, items: [], total: 0 }
+      })
       qc.invalidateQueries({ queryKey: ['traces'] })
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))

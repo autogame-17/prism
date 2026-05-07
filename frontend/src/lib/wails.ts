@@ -248,6 +248,16 @@ export function channelsTest(
   )
 }
 
+// channelsFetchModels probes GET /v1/models on the provider implied by the
+// editor form (no save required). Used by the "Fetch from Base URL" action
+// next to the Models textarea so users can populate the field from upstream
+// instead of typing every model name by hand.
+export function channelsFetchModels(p: ChannelPayload): Promise<string[]> {
+  return strict(
+    async () => (await anyCall(ChannelsAPIRaw.FetchModels as never, p)) as string[]
+  )
+}
+
 export function providerTypes(): Promise<ProviderMeta[]> {
   return safe(async () => (await ChannelsAPIRaw.ListProviderTypes()) as unknown as ProviderMeta[], [])
 }

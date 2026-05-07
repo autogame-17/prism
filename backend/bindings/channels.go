@@ -392,6 +392,29 @@ func testChannelViaListModels(ch *model.Channel) *TestResult {
 	}
 }
 
+// FetchModels probes the provider's GET /v1/models for a *not-yet-saved*
+// channel payload (the editor form). Lets the user fill the Models field
+// directly from upstream without having to save first / type names by
+// hand. Used by the "Fetch from Base URL" button next to the Models
+// textarea in the channel editor.
+//
+// Returns the raw model list. Callers are expected to dedupe / merge
+// against any names the user has already typed.
+func (a *ChannelsAPI) FetchModels(p ChannelPayload) ([]string, error) {
+	ch := channelFromPayload(p)
+	models, err := controller.TestChannelListModels(ch)
+	if err != nil {
+		if errors.Is(err, controller.ErrModelListNotSupported) {
+			return nil, fmt.Errorf("this provider does not expose a model-list endpoint; please type the model names manually")
+		}
+		return nil, err
+	}
+	if len(models) == 0 {
+		return nil, errors.New("upstream returned an empty model list")
+	}
+	return models, nil
+}
+
 // renderModelListPreview produces a compact summary of the upstream model
 // list suitable for embedding in a toast. Caps at 5 names so a verbose
 // upstream (OpenRouter ships >300) does not overflow the UI.
