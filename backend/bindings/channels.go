@@ -402,6 +402,20 @@ func testChannelViaListModels(ch *model.Channel) *TestResult {
 // against any names the user has already typed.
 func (a *ChannelsAPI) FetchModels(p ChannelPayload) ([]string, error) {
 	ch := channelFromPayload(p)
+
+	// The editor intentionally never echoes the saved API key back to the
+	// frontend (keeps the secret out of the binding payload at rest), so
+	// when the user clicks "Fetch from Base URL" while editing an existing
+	// channel the form's key field is blank. Without backfill the upstream
+	// then rejects us with "invalid token". For new channels (ID == 0)
+	// there is nothing to backfill from, so an empty key falls through to
+	// the upstream — that's the expected behaviour.
+	if ch.Key == "" && p.ID > 0 {
+		if existing, err := model.GetChannelById(p.ID); err == nil && existing != nil {
+			ch.Key = existing.Key
+		}
+	}
+
 	models, err := controller.TestChannelListModels(ch)
 	if err != nil {
 		if errors.Is(err, controller.ErrModelListNotSupported) {
