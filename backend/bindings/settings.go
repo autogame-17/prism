@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"one-api/common/config"
@@ -22,6 +23,16 @@ import (
 
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
+
+// prismYAMLMu serialises every write to prism.yaml so two concurrent
+// settings calls (SetListenAddr + SetCloudflareTunnel, or two of the
+// same kind from a debounced UI) can't lose each other's edits via the
+// classic read-modify-write race. The atomic tmp+rename only protects
+// against a partial file from a single writer; nothing protects two
+// writers reading the pre-edit state in parallel and stomping each
+// other's tmp file. The mutex is process-wide because every binding
+// here writes the same prism.yaml under dataDir.
+var prismYAMLMu sync.Mutex
 
 // SettingsAPI exposes app-level settings + data-directory / import-export.
 type SettingsAPI struct {
@@ -472,11 +483,14 @@ func (a *SettingsAPI) SetCloudflareTunnel(token, hostname string) error {
 // scalar key equals value. Existing comments, ordering and untouched
 // fields are preserved. Empty value removes the key entirely. The write
 // is atomic via tmp+rename, so a crash mid-write can't corrupt the file.
+// Concurrent callers are serialised by prismYAMLMu (see top of file).
 //
 // The value is always emitted as a quoted YAML string (`key: "value"`)
 // so that scalars like "127.0.0.1:39527" or hostnames containing dots
 // can never be misparsed as integers / booleans / unintended types.
 func writeStringFieldToYAML(path, key, value string) error {
+	prismYAMLMu.Lock()
+	defer prismYAMLMu.Unlock()
 	body, err := os.ReadFile(path)
 	if err != nil {
 		if !os.IsNotExist(err) {
@@ -601,10 +615,14 @@ func writeNestedStringFieldToYAML(path, parent, child, value string) error {
 // Atomicity is critical: SetCloudflareTunnel needs token + hostname
 // to land together so the "both set or both empty" invariant can't
 // be violated by a crash between two separate file rewrites.
+//
+// Concurrent callers are serialised by prismYAMLMu (see top of file).
 func writeNestedStringFieldsToYAML(path, parent string, children map[string]string) error {
 	if len(children) == 0 {
 		return nil
 	}
+	prismYAMLMu.Lock()
+	defer prismYAMLMu.Unlock()
 	body, err := os.ReadFile(path)
 	if err != nil {
 		if !os.IsNotExist(err) {
