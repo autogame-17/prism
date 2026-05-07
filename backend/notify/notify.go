@@ -15,10 +15,21 @@
 package notify
 
 import (
+	"context"
 	"os/exec"
 	"runtime"
 	"strings"
+	"time"
 )
+
+// helperTimeout caps every external helper invocation. None of these
+// commands should take more than a couple seconds; if they do, the
+// helper is hung (locked screen on macOS, missing wayland session on
+// Linux, frozen powershell profile on Windows) and we'd rather fail the
+// notification than block the goroutine that asked for it. 5s is
+// comfortably above worst-case startup for the slowest helper here
+// (powershell with -NoProfile is ~1-2s on cold cache).
+const helperTimeout = 5 * time.Second
 
 // Copy writes text to the OS clipboard. Returns true if the underlying
 // helper exited cleanly. We never error out — Copy is purely a UX nicety
@@ -70,12 +81,23 @@ func Show(title, body string) bool {
 
 // runWithStdin pipes text into a helper command's stdin and returns true
 // if it exited cleanly. Any error (binary missing, non-zero exit, helper
-// hung) collapses to false so callers can fall through to the next
-// fallback.
+// hung past helperTimeout) collapses to false so callers can fall
+// through to the next fallback.
 func runWithStdin(text, name string, args ...string) bool {
-	cmd := exec.Command(name, args...)
+	ctx, cancel := context.WithTimeout(context.Background(), helperTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Stdin = strings.NewReader(text)
 	return cmd.Run() == nil
+}
+
+// runWithTimeout is the same as cmd.Run() but enforces helperTimeout.
+// Used by the notification helpers (osascript, notify-send) where we
+// don't pipe stdin and just need to fire-and-wait.
+func runWithTimeout(name string, args ...string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), helperTimeout)
+	defer cancel()
+	return exec.CommandContext(ctx, name, args...).Run() == nil
 }
 
 // applescriptEscape escapes a string so it can be safely embedded
@@ -95,7 +117,7 @@ func applescriptEscape(s string) string {
 func showDarwin(title, body string) bool {
 	script := `display notification "` + applescriptEscape(body) +
 		`" with title "` + applescriptEscape(title) + `"`
-	return exec.Command("osascript", "-e", script).Run() == nil
+	return runWithTimeout("osascript", "-e", script)
 }
 
 // showWindows raises a balloon tip via System.Windows.Forms.NotifyIcon.
@@ -125,7 +147,11 @@ func showWindows(title, body string) bool {
 	// -NoProfile keeps PowerShell from sourcing a slow user profile;
 	// -WindowStyle Hidden prevents a console flash. -STA is required
 	// for any Windows.Forms / WPF interop.
-	cmd := exec.Command("powershell",
+	// 15s budget covers the script's intentional 9s Start-Sleep plus
+	// PowerShell startup (1-2s cold). If the helper hangs past this,
+	// CommandContext will SIGKILL it via the cancel.
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	cmd := exec.CommandContext(ctx, "powershell",
 		"-NoProfile",
 		"-NonInteractive",
 		"-WindowStyle", "Hidden",
@@ -133,12 +159,18 @@ func showWindows(title, body string) bool {
 		"-Command", script,
 	)
 	if err := cmd.Start(); err != nil {
+		cancel()
 		return false
 	}
 	// PowerShell sleeps ~9s before disposing the icon, so we mustn't
 	// block the OnURL callback for that long. Reap the child in the
-	// background so its process struct is released eventually.
-	go func() { _ = cmd.Wait() }()
+	// background so its process struct is released; cancelling the
+	// ctx here is a no-op once Wait returns naturally and is the
+	// SIGKILL trigger if the helper wedges past the deadline.
+	go func() {
+		defer cancel()
+		_ = cmd.Wait()
+	}()
 	return true
 }
 
@@ -148,12 +180,16 @@ func showWindows(title, body string) bool {
 // skip the notification — Copy() probably also failed in that case, but
 // the in-window toast still works when Prism's window is open.
 func showLinux(title, body string) bool {
-	cmd := exec.Command("notify-send",
+	// `--` ends notify-send's option parsing so a title or body that
+	// happens to start with `-` (e.g. an URL like "--..." or a tunnel
+	// log line) won't be mistaken for a flag. notify-send uses GLib's
+	// GOption parser which honours "--" as the end-of-options marker.
+	return runWithTimeout("notify-send",
 		"--app-name", "Prism",
 		"--urgency", "normal",
 		"--expire-time", "8000",
+		"--",
 		title,
 		body,
 	)
-	return cmd.Run() == nil
 }
