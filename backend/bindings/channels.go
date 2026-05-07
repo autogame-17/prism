@@ -337,27 +337,51 @@ func (a *ChannelsAPI) Test(id int, modelName string) (*TestResult, error) {
 // testChannelViaListModels runs the GetModelList fallback and renders a
 // human-readable TestResult. Always returns a result (never an error) so
 // the UI consistently sees a Success flag plus a message.
+//
+// Failure surface is unified: every non-success path tells the user to
+// fill the Test model field, since that is the one configuration change
+// they can make to unblock themselves regardless of the underlying cause
+// (empty list, missing endpoint, upstream rejection). Real errors are
+// kept in the message tail so a misconfigured key / wrong BaseURL is
+// still visible — we just append the actionable hint.
+const fillTestModelHint = "please fill the Test model field"
+
 func testChannelViaListModels(ch *model.Channel) *TestResult {
 	start := time.Now()
 	models, err := controller.TestChannelListModels(ch)
 	elapsed := int(time.Since(start).Milliseconds())
 	ch.UpdateResponseTime(int64(elapsed))
 
-	if err != nil {
+	failure := func(detail string) *TestResult {
 		var msg string
-		if errors.Is(err, controller.ErrModelListNotSupported) {
-			// Bedrock / Vertex-style providers: no /v1/models. Tell the
-			// user to fill the Test model field instead of misleading
-			// them into thinking the channel itself is broken.
-			msg = "please fill the Test model field — this provider does not expose a model-list endpoint"
+		if detail == "" {
+			msg = fillTestModelHint
 		} else {
-			msg = err.Error()
+			msg = fmt.Sprintf("%s (%s)", fillTestModelHint, detail)
 		}
 		return &TestResult{
 			Success:      false,
 			ResponseTime: elapsed,
 			Message:      fmt.Sprintf("channel %d (%s) failed: %s", ch.Id, ch.Name, msg),
 		}
+	}
+
+	switch {
+	case errors.Is(err, controller.ErrModelListNotSupported):
+		// Bedrock / Vertex-style providers: there is no /v1/models route
+		// at all, so the user must pick a test model themselves.
+		return failure("provider has no model-list endpoint")
+	case err != nil:
+		// Upstream replied with a non-2xx (404 from a stripped gateway,
+		// 401 invalid key, network/timeout, …). Keep the original error
+		// in the tail so the user can still tell auth issues apart from
+		// "this gateway does not expose /v1/models".
+		return failure(err.Error())
+	case len(models) == 0:
+		// Upstream answered but returned no models. Treat this the same
+		// as "no list available" — there is nothing for the fallback
+		// to ping with.
+		return failure("upstream returned an empty model list")
 	}
 
 	preview := renderModelListPreview(models)
