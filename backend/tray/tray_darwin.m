@@ -74,9 +74,22 @@ void prism_tray_set_icon(const char *path) {
         NSImage *img = [[NSImage alloc] initWithContentsOfFile:p];
         if (img == nil) return;
 
-        // Standard menu bar icons are 18pt tall (NSStatusBar thickness is
-        // 22, but Apple's HIG reserves 2pt padding top and bottom). Size
-        // the image to the icon area rather than the full bar.
+        // The PNG on disk is 36x36 px but a status bar icon is 18 pt tall
+        // (NSStatusBar thickness 22 minus 2pt padding top/bottom). Without
+        // intervention NSImage treats the bitmap as 1x (36pt logical) and
+        // then setSize:18 forces AppKit to down-resample to 18pt, which on
+        // Retina displays gets re-upsampled to 36px — a double-resample
+        // path that produces visible jagged edges ("毛边") even with a
+        // pre-supersampled source.
+        //
+        // Marking each underlying rep as 18pt instead of 36pt re-interprets
+        // the bitmap as a 2x representation (pixelsWide / repSize = 2). On
+        // Retina this lets AppKit draw the 36px source 1:1 with zero
+        // resampling; on 1x displays AppKit performs a single high-quality
+        // downsample to 18px instead of the previous double-resample.
+        for (NSImageRep *rep in [img representations]) {
+            [rep setSize:NSMakeSize(18, 18)];
+        }
         [img setSize:NSMakeSize(18, 18)];
 
         // Template = YES: macOS recolours the alpha mask to match the
