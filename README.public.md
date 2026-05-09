@@ -1,6 +1,6 @@
 # Prism
 
-A desktop app that runs a local LLM gateway on your Mac/Windows/Linux box and exposes it as an OpenAI-compatible endpoint, so Cursor, Cline, Cherry Studio, or anything else that talks `/v1/chat/completions` can hit one URL and reach 37 providers behind it.
+A desktop app that runs a local LLM gateway on your Mac/Windows/Linux box and exposes it as an OpenAI-compatible endpoint, so Cursor, Cline, Cherry Studio, or anything else that talks `/v1/chat/completions` can hit one URL and reach 39 providers behind it.
 
 Read this in [简体中文](./README.zh-CN.md).
 
@@ -21,7 +21,7 @@ Prism wraps the [one-hub](https://github.com/MartialBE/one-api) gateway as a Wai
 What you get:
 
 - One OpenAI-compatible HTTP endpoint, local or temporarily public.
-- 37 providers behind it: OpenAI, Anthropic, Gemini, Bedrock, Vertex AI, DeepSeek, Groq, Zhipu, Moonshot, …
+- 39 providers behind it: OpenAI, Anthropic, Gemini, Bedrock, Vertex AI, DeepSeek, Groq, Zhipu, Moonshot, local ChatGPT / Claude subscriptions, …
 - A real desktop UI for managing channels, tokens, request logs, and full request/response traces.
 - A copy-paste snippet generator that produces ready-to-use Cursor / Cline / Cherry Studio configs.
 
@@ -59,6 +59,45 @@ On Windows, SmartScreen will warn — "More info" → "Run anyway". On Linux, yo
 3. **Tokens → New** — give it a name. "Unlimited quota" is fine for single-user setups.
 4. **Dashboard → Start tunnel** — Prism launches `cloudflared` and shows you a public URL within a few seconds. (Or skip the tunnel and use `http://127.0.0.1:<port>` from the same machine.)
 5. On the Tokens page, click the snippet icon, pick your client, and paste the resulting JSON into Cursor / Cline / Cherry Studio.
+
+## ChatGPT / Claude subscription accounts
+
+Prism can also route chat completions through local subscription logins instead of platform API keys. This is intentionally implemented as a local CLI bridge: Prism uses the official desktop-authenticated command-line tools already logged in on the same machine, rather than storing browser cookies or private web session tokens.
+
+Prerequisites:
+
+```bash
+# ChatGPT subscription via Codex CLI
+codex login
+codex login status
+
+# Claude subscription via Claude Code CLI
+claude auth login
+claude auth status
+```
+
+Then configure Prism:
+
+1. Open **Channels -> New**.
+2. For ChatGPT Plus/Pro/Team subscriptions, choose **ChatGPT Subscription (Codex CLI)**.
+   - Leave **Base URL** empty.
+   - Leave the generated access label (`local-codex`) as-is.
+   - Default models: `gpt-5.5,gpt-5.4,gpt-5.3-codex,gpt-5.3-codex-spark,gpt-5.2-codex`.
+   - Test model: `gpt-5.5`.
+3. For Claude Pro/Max subscriptions, choose **Claude Subscription (Claude CLI)**.
+   - Leave **Base URL** empty.
+   - Leave the generated access label (`local-claude`) as-is.
+   - Default models: `sonnet,opus,haiku`.
+   - Test model: `sonnet`.
+4. Click **Create**, then use the channel test button. A successful test means the local CLI login is usable from Prism.
+5. Create a Prism token under **Tokens**, then use the normal OpenAI-compatible endpoint from Cursor / Cline / Cherry Studio.
+
+Notes:
+
+- These channels currently support text `/v1/chat/completions`.
+- Streaming is compatibility-mode: Prism waits for the CLI response, then emits OpenAI-style chunks.
+- Tool calls, image input/output, embeddings and audio are not supported by the subscription bridge.
+- The bridge uses the current OS user login state. If `codex login status` or `claude auth status` fails in Terminal, the Prism channel will fail too.
 
 ## What's actually in here
 

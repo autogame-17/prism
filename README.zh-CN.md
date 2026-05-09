@@ -1,6 +1,6 @@
 # Prism
 
-把一个本地 LLM 网关塞进 macOS / Windows / Linux 桌面端，对外吐出一个 OpenAI 兼容的 HTTP 入口。Cursor、Cline、Cherry Studio 这些只认 `/v1/chat/completions` 的客户端，配一个 URL 就能切到 37 家 provider。
+把一个本地 LLM 网关塞进 macOS / Windows / Linux 桌面端，对外吐出一个 OpenAI 兼容的 HTTP 入口。Cursor、Cline、Cherry Studio 这些只认 `/v1/chat/completions` 的客户端，配一个 URL 就能切到 39 家 provider。
 
 English version: [README.md](./README.md).
 
@@ -21,7 +21,7 @@ Prism 把 [one-hub](https://github.com/MartialBE/one-api) 网关核心当库直�
 具体能用上的东西：
 
 - 一个 OpenAI 兼容的 HTTP 入口，本地或临时公网。
-- 入口背后挂着 37 家 provider：OpenAI、Anthropic、Gemini、Bedrock、Vertex AI、DeepSeek、Groq、智谱、月之暗面 ……
+- 入口背后挂着 39 家 provider：OpenAI、Anthropic、Gemini、Bedrock、Vertex AI、DeepSeek、Groq、智谱、月之暗面、本机 ChatGPT / Claude 订阅桥接 ……
 - 一个真正的桌面 UI，管渠道、Token、请求日志、完整的请求 / 响应 trace。
 - 一个 snippet 生成器，按你选的客户端（Cursor / Cline / Cherry Studio）直接生成可贴的 JSON。
 
@@ -61,6 +61,45 @@ Windows 第一次会撞 SmartScreen，"More info" → "Run anyway"。Linux 需�
 3. **Tokens → New** —— 起个名，单人用直接选 "Unlimited quota"。
 4. **Dashboard → Start tunnel** —— Prism 起 `cloudflared`，几秒后 UI 上会出现公网 URL。（不开 tunnel 也行，本机用 `http://127.0.0.1:<port>` 就够。）
 5. 在 Tokens 列表点 snippet 图标，选你的客户端，把生成的 JSON 贴进 Cursor / Cline / Cherry Studio。
+
+## ChatGPT / Claude 订阅账号
+
+Prism 也可以把聊天补全请求转到本机已经登录的订阅账号，而不是平台 API Key。这个能力刻意做成本地 CLI 桥接：Prism 调用同一台机器上已网页登录授权过的官方命令行工具，不保存浏览器 cookie，也不保存私有网页 session token。
+
+前置条件：
+
+```bash
+# ChatGPT 订阅，通过 Codex CLI
+codex login
+codex login status
+
+# Claude 订阅，通过 Claude Code CLI
+claude auth login
+claude auth status
+```
+
+然后在 Prism 里配置：
+
+1. 打开 **Channels -> New**。
+2. 如果要用 ChatGPT Plus / Pro / Team 订阅，选择 **ChatGPT Subscription (Codex CLI)**。
+   - **Base URL** 留空。
+   - 自动生成的 access label（`local-codex`）保持默认即可。
+   - 默认模型：`gpt-5.5,gpt-5.4,gpt-5.3-codex,gpt-5.3-codex-spark,gpt-5.2-codex`。
+   - 测试模型：`gpt-5.5`。
+3. 如果要用 Claude Pro / Max 订阅，选择 **Claude Subscription (Claude CLI)**。
+   - **Base URL** 留空。
+   - 自动生成的 access label（`local-claude`）保持默认即可。
+   - 默认模型：`sonnet,opus,haiku`。
+   - 测试模型：`sonnet`。
+4. 点 **Create**，然后点渠道测试按钮。测试成功说明 Prism 能调用本机订阅登录。
+5. 再到 **Tokens** 创建 Prism token，Cursor / Cline / Cherry Studio 继续按普通 OpenAI-compatible endpoint 使用。
+
+注意：
+
+- 订阅桥接目前支持文本 `/v1/chat/completions`。
+- 流式响应是兼容模式：Prism 等 CLI 返回完整内容后，再包装成 OpenAI 风格 chunk。
+- 工具调用、图片输入输出、embedding、音频暂不支持。
+- 桥接依赖当前系统用户的登录状态。如果终端里 `codex login status` 或 `claude auth status` 失败，Prism 渠道也会失败。
 
 ## 里面到底有什么
 

@@ -40,6 +40,32 @@ import {
 } from '@/components/ui/dialog'
 
 type ChannelFormState = ChannelPayload
+type ProviderPreset = Partial<
+  Pick<ChannelFormState, 'name' | 'key' | 'baseURL' | 'other' | 'models' | 'testModel'>
+>
+type PresetField = keyof ProviderPreset
+
+const PROVIDER_TYPE_CHATGPT_SUBSCRIPTION = 57
+const PROVIDER_TYPE_CLAUDE_SUBSCRIPTION = 58
+
+const PROVIDER_PRESETS: Record<number, ProviderPreset> = {
+  [PROVIDER_TYPE_CHATGPT_SUBSCRIPTION]: {
+    name: 'chatgpt-subscription',
+    key: 'local-codex',
+    baseURL: '',
+    other: '',
+    models: 'gpt-5.5,gpt-5.4,gpt-5.3-codex,gpt-5.3-codex-spark,gpt-5.2-codex',
+    testModel: 'gpt-5.5',
+  },
+  [PROVIDER_TYPE_CLAUDE_SUBSCRIPTION]: {
+    name: 'claude-subscription',
+    key: 'local-claude',
+    baseURL: '',
+    other: '',
+    models: 'sonnet,opus,haiku',
+    testModel: 'sonnet',
+  },
+}
 
 const STATUS_KEYS: Record<number, { key: string; variant: 'default' | 'destructive' | 'secondary' | 'outline' }> = {
   1: { key: 'channels.status.enabled', variant: 'default' },
@@ -63,6 +89,35 @@ function emptyForm(typeFallback: number): ChannelFormState {
     priority: 0,
     weight: 0,
     status: 1,
+  }
+}
+
+function providerPreset(type: number): ProviderPreset {
+  return PROVIDER_PRESETS[type] ?? {}
+}
+
+function shouldReplacePresetField(field: PresetField, value: string): boolean {
+  if (value === '') return true
+  return Object.values(PROVIDER_PRESETS).some((preset) => preset[field] === value)
+}
+
+function applyProviderPreset(current: ChannelFormState, type: number): ChannelFormState {
+  const preset = providerPreset(type)
+  const applyStringPreset = (field: PresetField) => {
+    const presetValue = preset[field]
+    if (presetValue === undefined) return current[field]
+    return shouldReplacePresetField(field, current[field]) ? presetValue : current[field]
+  }
+
+  return {
+    ...current,
+    type,
+    name: applyStringPreset('name'),
+    key: applyStringPreset('key'),
+    baseURL: applyStringPreset('baseURL'),
+    other: applyStringPreset('other'),
+    models: applyStringPreset('models'),
+    testModel: applyStringPreset('testModel'),
   }
 }
 
@@ -135,7 +190,8 @@ export function ChannelsPage() {
 
   const onNew = () => {
     setIsEditing(false)
-    setForm(emptyForm(providers[0]?.type ?? 1))
+    const type = providers[0]?.type ?? 1
+    setForm(applyProviderPreset(emptyForm(type), type))
     setEditorOpen(true)
   }
 
@@ -392,7 +448,7 @@ function ChannelEditorDialog({
               <Label>{t('channels.editor.provider')}</Label>
               <Select
                 value={String(form.type)}
-                onChange={(e) => update('type', Number(e.target.value))}
+                onChange={(e) => setForm(applyProviderPreset(form, Number(e.target.value)))}
                 className="w-full"
               >
                 {providers.map((p) => (
@@ -561,6 +617,34 @@ type ProviderHints = {
 
 function providerHints(type: number): ProviderHints {
   switch (type) {
+    case PROVIDER_TYPE_CHATGPT_SUBSCRIPTION:
+      return {
+        description:
+          'Uses your local Codex CLI ChatGPT login. Run codex login first; Prism calls codex exec for chat completions.',
+        keyLabel: 'Access label',
+        keyPlaceholder: 'local-codex',
+        keyHelp: 'No platform API key is required. This uses the local Codex login on this machine.',
+        showBaseURL: false,
+        baseURLPlaceholder: '',
+        showOther: false,
+        otherLabel: '',
+        otherPlaceholder: '',
+        otherHelp: '',
+      }
+    case PROVIDER_TYPE_CLAUDE_SUBSCRIPTION:
+      return {
+        description:
+          'Uses your local Claude Code login. Run claude auth login first; Prism calls claude -p for chat completions.',
+        keyLabel: 'Access label',
+        keyPlaceholder: 'local-claude',
+        keyHelp: 'No Anthropic API key is required. This uses the local Claude CLI login on this machine.',
+        showBaseURL: false,
+        baseURLPlaceholder: '',
+        showOther: false,
+        otherLabel: '',
+        otherPlaceholder: '',
+        otherHelp: '',
+      }
     case 25:
       return {
         description: 'Google Gemini uses an API key from AI Studio.',

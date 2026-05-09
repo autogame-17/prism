@@ -27,9 +27,11 @@ type ProviderMeta struct {
 func (a *ChannelsAPI) ListProviderTypes() []ProviderMeta {
 	return []ProviderMeta{
 		{config.ChannelTypeOpenAI, "OpenAI"},
+		{config.ChannelTypeChatGPTSubscription, "ChatGPT Subscription (Codex CLI)"},
 		{config.ChannelTypeAzure, "Azure OpenAI"},
 		{config.ChannelTypeCustom, "Custom (OpenAI-compatible)"},
 		{config.ChannelTypeAnthropic, "Anthropic"},
+		{config.ChannelTypeClaudeSubscription, "Claude Subscription (Claude CLI)"},
 		{config.ChannelTypeGemini, "Google Gemini"},
 		{config.ChannelTypeBedrock, "Amazon Bedrock"},
 		{config.ChannelTypeVertexAI, "Google Vertex AI"},
@@ -75,21 +77,21 @@ type ChannelListRequest struct {
 
 // ChannelSummary is the list row shape (key omitted for security).
 type ChannelSummary struct {
-	ID             int     `json:"id"`
-	Type           int     `json:"type"`
-	Name           string  `json:"name"`
-	Status         int     `json:"status"`
-	Priority       int64   `json:"priority"`
-	Weight         uint    `json:"weight"`
-	Models         string  `json:"models"`
-	Group          string  `json:"group"`
-	BaseURL        string  `json:"baseURL"`
-	TestModel      string  `json:"testModel"`
-	Proxy          string  `json:"proxy"`
-	ResponseTime   int     `json:"responseTime"`
-	Balance        float64 `json:"balance"`
-	UsedQuota      int64   `json:"usedQuota"`
-	CreatedTime    int64   `json:"createdTime"`
+	ID           int     `json:"id"`
+	Type         int     `json:"type"`
+	Name         string  `json:"name"`
+	Status       int     `json:"status"`
+	Priority     int64   `json:"priority"`
+	Weight       uint    `json:"weight"`
+	Models       string  `json:"models"`
+	Group        string  `json:"group"`
+	BaseURL      string  `json:"baseURL"`
+	TestModel    string  `json:"testModel"`
+	Proxy        string  `json:"proxy"`
+	ResponseTime int     `json:"responseTime"`
+	Balance      float64 `json:"balance"`
+	UsedQuota    int64   `json:"usedQuota"`
+	CreatedTime  int64   `json:"createdTime"`
 }
 
 // ChannelListResponse wraps the paginated result.
