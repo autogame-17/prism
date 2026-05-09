@@ -16,6 +16,7 @@ import {
 } from '@/lib/wails'
 import { useI18n } from '@/lib/i18n'
 import { Button } from '@/components/ui/button'
+import { LoadingBar } from '@/components/ui/loading-bar'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
@@ -88,6 +89,7 @@ export function ChannelsPage() {
   const [editorOpen, setEditorOpen] = useState(false)
   const [form, setForm] = useState<ChannelFormState>(emptyForm(1))
   const [isEditing, setIsEditing] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
   const [deleteId, setDeleteId] = useState<number | null>(null)
 
   const providersQ = useQuery({
@@ -206,9 +208,14 @@ export function ChannelsPage() {
               <Button
                 variant="outline"
                 size="icon"
-                onClick={() => qc.invalidateQueries({ queryKey: ['channels'] })}
+                disabled={refreshing}
+                onClick={() => {
+                  setRefreshing(true)
+                  qc.invalidateQueries({ queryKey: ['channels'] })
+                  setTimeout(() => setRefreshing(false), 400)
+                }}
               >
-                <RefreshCw className="h-4 w-4" />
+                <RefreshCw className={`h-4 w-4${refreshing ? ' animate-spin' : ''}`} />
               </Button>
             </TooltipTrigger>
             <TooltipContent>{t('common.refresh')}</TooltipContent>
@@ -219,7 +226,9 @@ export function ChannelsPage() {
         </div>
       </div>
 
-      <Table>
+      <div className="relative">
+        <LoadingBar loading={refreshing} />
+        <Table>
           <TableHeader>
             <TableRow>
               <TableHead className="w-12">{t('common.id')}</TableHead>
@@ -321,6 +330,7 @@ export function ChannelsPage() {
             )}
           </TableBody>
       </Table>
+      </div>
 
       <div className="flex items-center justify-between text-xs text-muted-foreground">
         <span>

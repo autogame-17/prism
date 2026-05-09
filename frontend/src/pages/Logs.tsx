@@ -49,6 +49,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { LoadingBar } from '@/components/ui/loading-bar'
 
 type Tab = 'traces' | 'request' | 'system'
 
@@ -100,6 +101,7 @@ function TracesView() {
   const [model, setModel] = useState('')
   const [onlyErrors, setOnlyErrors] = useState(false)
   const [selectedId, setSelectedId] = useState<number | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
   const [confirmPurge, setConfirmPurge] = useState(false)
 
   const q = useQuery({
@@ -167,9 +169,14 @@ function TracesView() {
             <Button
               variant="outline"
               size="icon"
-              onClick={() => qc.invalidateQueries({ queryKey: ['traces'] })}
+              disabled={refreshing}
+              onClick={() => {
+                setRefreshing(true)
+                qc.invalidateQueries({ queryKey: ['traces'] })
+                setTimeout(() => setRefreshing(false), 400)
+              }}
             >
-              <RefreshCw className="h-4 w-4" />
+              <RefreshCw className={`h-4 w-4${refreshing ? ' animate-spin' : ''}`} />
             </Button>
           </TooltipTrigger>
           <TooltipContent>{t('common.refresh')}</TooltipContent>
@@ -179,6 +186,7 @@ function TracesView() {
           {t('logs.traces.purgeAll')}
         </Button>
       </div>
+        <LoadingBar loading={refreshing} />
         <Table>
           <TableHeader>
             <TableRow>
@@ -401,6 +409,7 @@ function RequestLogsView() {
   const [page, setPage] = useState(1)
   const [modelName, setModelName] = useState('')
   const [tokenName, setTokenName] = useState('')
+  const [refreshing, setRefreshing] = useState(false)
 
   const q = useQuery({
     queryKey: ['request-logs', page, modelName, tokenName],
@@ -440,14 +449,20 @@ function RequestLogsView() {
             <Button
               variant="outline"
               size="icon"
-              onClick={() => qc.invalidateQueries({ queryKey: ['request-logs'] })}
+              disabled={refreshing}
+              onClick={() => {
+                setRefreshing(true)
+                qc.invalidateQueries({ queryKey: ['request-logs'] })
+                setTimeout(() => setRefreshing(false), 400)
+              }}
             >
-              <RefreshCw className="h-4 w-4" />
+              <RefreshCw className={`h-4 w-4${refreshing ? ' animate-spin' : ''}`} />
             </Button>
           </TooltipTrigger>
           <TooltipContent>{t('common.refresh')}</TooltipContent>
         </Tooltip>
       </div>
+        <LoadingBar loading={refreshing} />
         <Table>
           <TableHeader>
             <TableRow>
