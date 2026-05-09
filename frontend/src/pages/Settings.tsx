@@ -19,8 +19,23 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { useI18n } from '@/lib/i18n'
 import { applyTheme, getStoredTheme, setStoredTheme, trackSystemTheme, type Theme } from '@/lib/theme'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 
 export function SettingsPage() {
   const t = useI18n((s) => s.t)
@@ -41,6 +56,8 @@ export function SettingsPage() {
   const [tunnelTokenDraft, setTunnelTokenDraft] = useState<string>('')
   const [tunnelHostDraft, setTunnelHostDraft] = useState<string>('')
   const [tunnelSaving, setTunnelSaving] = useState(false)
+  const [confirmAction, setConfirmAction] = useState<'import-replace' | 'clear-tunnel' | null>(null)
+  const [importPath, setImportPath] = useState<string | null>(null)
 
   useEffect(() => {
     if (listenQ.data) {
@@ -83,7 +100,15 @@ export function SettingsPage() {
   const onImport = async (replace: boolean) => {
     const path = await openFileDialog(t('settings.importTitle'))
     if (!path) return
-    if (replace && !confirm(t('settings.import.confirm'))) return
+    if (replace) {
+      setImportPath(path)
+      setConfirmAction('import-replace')
+      return
+    }
+    await doImport(path, false)
+  }
+
+  const doImport = async (path: string, replace: boolean) => {
     setBusy(true)
     try {
       await settingsImportFromFile(path, replace)
@@ -142,7 +167,11 @@ export function SettingsPage() {
     }
   }
 
-  const onClearTunnel = async () => {
+  const onClearTunnel = () => {
+    setConfirmAction('clear-tunnel')
+  }
+
+  const doClearTunnel = async () => {
     setTunnelSaving(true)
     try {
       await settingsSetCloudflareTunnel('', '')
@@ -238,19 +267,23 @@ export function SettingsPage() {
                 {listenQ.data?.actual || '—'}
               </p>
               {listenQ.data?.actual && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() =>
-                    copyToClipboard(
-                      `http://${listenQ.data!.actual}/v1`,
-                      t('settings.listen.copied', 'Copied')
-                    )
-                  }
-                  title={t('settings.listen.copyBaseUrl', 'Copy base URL')}
-                >
-                  <Copy className="h-3.5 w-3.5" />
-                </Button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() =>
+                        copyToClipboard(
+                          `http://${listenQ.data!.actual}/v1`,
+                          t('settings.listen.copied', 'Copied')
+                        )
+                      }
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t('settings.listen.copyBaseUrl', 'Copy base URL')}</TooltipContent>
+                </Tooltip>
               )}
             </div>
             {listenQ.data &&
@@ -324,7 +357,7 @@ export function SettingsPage() {
               {t('settings.tunnel.save', 'Save')}
             </Button>
             {tunnelQ.data?.hasToken && (
-              <Button variant="outline" onClick={onClearTunnel} disabled={tunnelSaving}>
+              <Button variant="outline" onClick={onClearTunnel} disabled={tunnelSaving} className="text-amber-600 hover:text-amber-700 hover:bg-amber-500/10 border-amber-500/30 dark:text-amber-400">
                 {t('settings.tunnel.clear', 'Disable named tunnel')}
               </Button>
             )}
@@ -380,7 +413,7 @@ export function SettingsPage() {
             <Button variant="outline" onClick={() => onImport(false)} disabled={busy}>
               {t('settings.import.merge')}
             </Button>
-            <Button variant="outline" onClick={() => onImport(true)} disabled={busy}>
+            <Button variant="outline" onClick={() => onImport(true)} disabled={busy} className="text-amber-600 hover:text-amber-700 hover:bg-amber-500/10 border-amber-500/30 dark:text-amber-400">
               {t('settings.import.replace')}
             </Button>
           </div>
@@ -421,6 +454,46 @@ export function SettingsPage() {
           </div>
         </CardContent>
       </Card>
+      {/* Confirm dialog: import replace */}
+      <AlertDialog open={confirmAction === 'import-replace'} onOpenChange={(open) => { if (!open) setConfirmAction(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('settings.import.replace')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('settings.import.confirm')}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('settings.cancel', 'Cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={async () => {
+                setConfirmAction(null)
+                if (importPath) await doImport(importPath, true)
+              }}
+            >
+              {t('settings.import.replace')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Confirm dialog: clear tunnel config */}
+      <AlertDialog open={confirmAction === 'clear-tunnel'} onOpenChange={(open) => { if (!open) setConfirmAction(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('settings.tunnel.clear', 'Disable named tunnel')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('settings.tunnel.clearConfirm', 'This will remove the named tunnel configuration and revert to trycloudflare (random URL). Are you sure?')}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('settings.cancel', 'Cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { setConfirmAction(null); doClearTunnel() }}>
+              {t('settings.tunnel.clear', 'Disable named tunnel')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

@@ -9,6 +9,16 @@ import {
 } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { copyToClipboard, onEvent, tunnelLogs } from '@/lib/wails'
 import { useTunnel } from '@/hooks/useTunnel'
 import { useI18n } from '@/lib/i18n'
@@ -19,6 +29,7 @@ export function TunnelPage() {
   const tunnel = useTunnel()
   const [logs, setLogs] = useState<string[]>([])
   const boxRef = useRef<HTMLDivElement | null>(null)
+  const [confirmStop, setConfirmStop] = useState(false)
 
   useEffect(() => {
     let disposed = false
@@ -81,7 +92,7 @@ export function TunnelPage() {
                 <Button variant="secondary" onClick={tunnel.rotate} disabled={tunnel.busy}>
                   <RefreshCw className="h-4 w-4" /> {t('tunnel.rotate')}
                 </Button>
-                <Button variant="outline" onClick={tunnel.stop} disabled={tunnel.busy}>
+                <Button variant="outline" onClick={() => setConfirmStop(true)} disabled={tunnel.busy} className="border-amber-500/50 text-amber-600 hover:bg-amber-500/10 dark:text-amber-400">
                   <Square className="h-4 w-4" /> {t('tunnel.stop')}
                 </Button>
                 <Button variant="ghost" onClick={copyUrl}>
@@ -89,7 +100,7 @@ export function TunnelPage() {
                 </Button>
               </>
             ) : (
-              <Button onClick={tunnel.start} disabled={tunnel.busy}>
+              <Button onClick={tunnel.start} disabled={tunnel.busy} className="bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm">
                 <Play className="h-4 w-4" /> {t('tunnel.start')}
               </Button>
             )}
@@ -124,6 +135,26 @@ export function TunnelPage() {
           </div>
         </CardContent>
       </Card>
+
+      <AlertDialog open={confirmStop} onOpenChange={setConfirmStop}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('tunnel.confirmStopTitle') || 'Stop Tunnel?'}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('tunnel.confirmStopDesc') || 'The tunnel will be disconnected. Any active connections through it will be interrupted.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('common.cancel') || 'Cancel'}</AlertDialogCancel>
+            <AlertDialogAction
+              className="border-amber-500/50 bg-amber-600 text-white hover:bg-amber-700"
+              onClick={() => { tunnel.stop(); setConfirmStop(false) }}
+            >
+              {t('tunnel.stop') || 'Stop'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

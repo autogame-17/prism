@@ -25,6 +25,16 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import {
   Table,
   TableBody,
   TableCell,
@@ -34,6 +44,11 @@ import {
 } from '@/components/ui/table'
 import { toast } from 'sonner'
 import { useI18n } from '@/lib/i18n'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 
 type Tab = 'traces' | 'request' | 'system'
 
@@ -85,6 +100,7 @@ function TracesView() {
   const [model, setModel] = useState('')
   const [onlyErrors, setOnlyErrors] = useState(false)
   const [selectedId, setSelectedId] = useState<number | null>(null)
+  const [confirmPurge, setConfirmPurge] = useState(false)
 
   const q = useQuery({
     queryKey: ['traces', page, keyword, model, onlyErrors],
@@ -104,8 +120,7 @@ function TracesView() {
   const pageSize = q.data?.pageSize ?? 30
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
-  const purgeAll = async () => {
-    if (!confirm(t('logs.traces.purgeConfirm'))) return
+  const doPurge = async () => {
     try {
       const n = await tracesPurgeOlderThan(0)
       toast.success(t('logs.traces.purgeDone').replace('{n}', String(n)))
@@ -147,16 +162,20 @@ function TracesView() {
           />
           {t('logs.traces.onlyErrors')}
         </label>
-        <Button
-          variant="outline"
-          size="icon"
-          onClick={() => qc.invalidateQueries({ queryKey: ['traces'] })}
-          title={t('common.refresh')}
-        >
-          <RefreshCw className="h-4 w-4" />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => qc.invalidateQueries({ queryKey: ['traces'] })}
+            >
+              <RefreshCw className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{t('common.refresh')}</TooltipContent>
+        </Tooltip>
         <div className="flex-1" />
-        <Button size="sm" variant="outline" onClick={purgeAll}>
+        <Button size="sm" variant="outline" onClick={() => setConfirmPurge(true)} className="text-destructive hover:text-destructive hover:bg-destructive/10 border-destructive/30">
           {t('logs.traces.purgeAll')}
         </Button>
       </div>
@@ -213,6 +232,27 @@ function TracesView() {
           </Button>
         </div>
       </div>
+      <AlertDialog open={confirmPurge} onOpenChange={setConfirmPurge}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('logs.traces.purgeAll')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('logs.traces.purgeConfirm')}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setConfirmPurge(false)
+                doPurge()
+              }}
+            >
+              {t('logs.traces.purgeAll')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <TraceDetailDialog id={selectedId} onClose={() => setSelectedId(null)} />
     </div>
   )
@@ -245,12 +285,23 @@ function TraceRowItem({ row, onOpen }: { row: TraceSummary; onOpen: (id: number)
 
 function TraceDetailDialog({ id, onClose }: { id: number | null; onClose: () => void }) {
   const t = useI18n((s) => s.t)
+  const [settled, setSettled] = useState(false)
   const q = useQuery({
     queryKey: ['trace', id],
     queryFn: () => (id ? tracesGet(id) : Promise.resolve(null)),
     enabled: id !== null,
   })
-  const d: TraceDetail | null = q.data ?? null
+  // Defer heavy content rendering until the dialog open animation finishes.
+  // The query starts immediately (prefetch), but we hold back the data so
+  // the layout shift from spinner → content doesn't collide with the animation.
+  useEffect(() => {
+    setSettled(false)
+    if (id !== null) {
+      const timer = setTimeout(() => setSettled(true), 160)
+      return () => clearTimeout(timer)
+    }
+  }, [id])
+  const d: TraceDetail | null = settled ? (q.data ?? null) : null
   const copy = (s: string) => {
     navigator.clipboard.writeText(s).then(
       () => toast.success(t('common.copied')),
@@ -259,7 +310,7 @@ function TraceDetailDialog({ id, onClose }: { id: number | null; onClose: () => 
   }
   return (
     <Dialog open={id !== null} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="w-[min(90vw,960px)] max-w-[90vw] overflow-hidden">
+      <DialogContent className="w-[min(90vw,960px)] max-w-[90vw] min-h-[340px] overflow-hidden">
         <DialogHeader>
           <DialogTitle>{t('logs.traces.detailTitle')}</DialogTitle>
         </DialogHeader>
@@ -384,14 +435,18 @@ function RequestLogsView() {
           placeholder={t('logs.filter.token')}
           className="w-48"
         />
-        <Button
-          variant="outline"
-          size="icon"
-          onClick={() => qc.invalidateQueries({ queryKey: ['request-logs'] })}
-          title={t('common.refresh')}
-        >
-          <RefreshCw className="h-4 w-4" />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => qc.invalidateQueries({ queryKey: ['request-logs'] })}
+            >
+              <RefreshCw className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{t('common.refresh')}</TooltipContent>
+        </Tooltip>
       </div>
         <Table>
           <TableHeader>

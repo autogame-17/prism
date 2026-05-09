@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import { Sidebar } from '@/components/layout/sidebar'
 import { Topbar } from '@/components/layout/topbar'
 import { OnboardingDialog } from '@/components/onboarding'
+import { TooltipProvider } from '@/components/ui/tooltip'
 import { DashboardPage } from '@/pages/Dashboard'
 import { ChannelsPage } from '@/pages/Channels'
 import { TokensPage } from '@/pages/Tokens'
@@ -104,6 +105,7 @@ export function App() {
 
   return (
     <HashRouter>
+      <TooltipProvider delayDuration={150}>
       <TrayNavigationBridge />
       <TunnelUrlChangeWatcher />
       <div className="flex h-screen overflow-hidden bg-background text-foreground selection:bg-primary/30">
@@ -130,6 +132,7 @@ export function App() {
         </div>
         <OnboardingDialog />
       </div>
+      </TooltipProvider>
     </HashRouter>
   )
 }

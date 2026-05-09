@@ -49,6 +49,21 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Select } from '@/components/ui/select'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 
 const STATUS_KEYS: Record<number, { key: string; variant: 'default' | 'secondary' | 'destructive' }> = {
   1: { key: 'channels.status.enabled', variant: 'default' },
@@ -67,6 +82,7 @@ export function TokensPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const [snippetFor, setSnippetFor] = useState<TokenSummary | null>(null)
   const [visibleKeys, setVisibleKeys] = useState<Record<number, boolean>>({})
+  const [deleteId, setDeleteId] = useState<number | null>(null)
 
   const listQ = useQuery({
     queryKey: ['tokens', page, keyword],
@@ -142,14 +158,18 @@ export function TokensPage() {
             placeholder={t('common.search')}
             className="w-56"
           />
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => qc.invalidateQueries({ queryKey: ['tokens'] })}
-            title={t('common.refresh')}
-          >
-            <RefreshCw className="h-4 w-4" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => qc.invalidateQueries({ queryKey: ['tokens'] })}
+              >
+                <RefreshCw className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t('common.refresh')}</TooltipContent>
+          </Tooltip>
           <Button onClick={() => setCreateOpen(true)}>
             <Plus className="mr-1 h-4 w-4" /> {t('common.new')}
           </Button>
@@ -229,32 +249,47 @@ export function TokensPage() {
                     <TableCell className="text-sm">{quotaLabel}</TableCell>
                     <TableCell>
                       <div className="flex justify-end gap-1">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          title={t('tokens.snippet')}
-                          onClick={() => setSnippetFor(tok)}
-                        >
-                          <Wand2 className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          title={t('channels.toggle')}
-                          onClick={() => toggleMu.mutate(tok.id)}
-                        >
-                          <Power className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          title={t('common.delete')}
-                          onClick={() => {
-                            if (confirm(t('tokens.confirmDelete'))) deleteMu.mutate(tok.id)
-                          }}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="text-violet-500 hover:text-violet-600 hover:bg-violet-500/10"
+                              onClick={() => setSnippetFor(tok)}
+                            >
+                              <Wand2 className="h-4 w-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>{t('tokens.snippet')}</TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className={tok.status === 1 ? "text-emerald-500 hover:text-emerald-600 hover:bg-emerald-500/10" : "text-amber-500 hover:text-amber-600 hover:bg-amber-500/10"}
+                              onClick={() => toggleMu.mutate(tok.id)}
+                            >
+                              <Power className="h-4 w-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>{t('channels.toggle')}</TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                              onClick={() => {
+                                setDeleteId(tok.id)
+                              }}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>{t('common.delete')}</TooltipContent>
+                        </Tooltip>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -300,6 +335,19 @@ export function TokensPage() {
         baseURL={baseURLQ.data ?? ''}
         onClose={() => setSnippetFor(null)}
       />
+
+      <AlertDialog open={deleteId !== null} onOpenChange={(v) => !v && setDeleteId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('tokens.confirmDelete')}</AlertDialogTitle>
+            <AlertDialogDescription />
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { if (deleteId) deleteMu.mutate(deleteId) }}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
@@ -310,16 +358,20 @@ function InlineRename({ value, onSave }: { value: string; onSave: (v: string) =>
   const [draft, setDraft] = useState(value)
   if (!editing) {
     return (
-      <button
-        className="rounded px-1 hover:bg-muted"
-        onDoubleClick={() => {
-          setDraft(value)
-          setEditing(true)
-        }}
-        title={t('tokens.rename.hint')}
-      >
-        {value}
-      </button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            className="rounded px-1 hover:bg-muted"
+            onDoubleClick={() => {
+              setDraft(value)
+              setEditing(true)
+            }}
+          >
+            {value}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>{t('tokens.rename.hint')}</TooltipContent>
+      </Tooltip>
     )
   }
   return (

@@ -77,7 +77,7 @@ func main() {
 		Bind:             app.Bindings(),
 		Mac: &mac.Options{
 			TitleBar:             mac.TitleBarHiddenInset(),
-			Appearance:           mac.NSAppearanceNameDarkAqua,
+			Appearance:           "",
 			WebviewIsTransparent: true,
 			WindowIsTranslucent:  true,
 		},

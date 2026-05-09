@@ -37,6 +37,21 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 
 type ChannelFormState = ChannelPayload
 
@@ -73,6 +88,7 @@ export function ChannelsPage() {
   const [editorOpen, setEditorOpen] = useState(false)
   const [form, setForm] = useState<ChannelFormState>(emptyForm(1))
   const [isEditing, setIsEditing] = useState(false)
+  const [deleteId, setDeleteId] = useState<number | null>(null)
 
   const providersQ = useQuery({
     queryKey: ['provider-types'],
@@ -185,14 +201,18 @@ export function ChannelsPage() {
             placeholder={t('channels.searchPlaceholder')}
             className="w-56"
           />
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => qc.invalidateQueries({ queryKey: ['channels'] })}
-            title={t('common.refresh')}
-          >
-            <RefreshCw className="h-4 w-4" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => qc.invalidateQueries({ queryKey: ['channels'] })}
+              >
+                <RefreshCw className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t('common.refresh')}</TooltipContent>
+          </Tooltip>
           <Button onClick={onNew}>
             <Plus className="mr-1 h-4 w-4" /> {t('common.new')}
           </Button>
@@ -241,41 +261,58 @@ export function ChannelsPage() {
                     <TableCell className="text-right text-sm">{c.priority}</TableCell>
                     <TableCell>
                       <div className="flex justify-end gap-1">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          title={t('channels.test')}
-                          onClick={() => testMu.mutate({ id: c.id, model: c.testModel })}
-                          disabled={testMu.isPending}
-                        >
-                          <Play className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          title={t('channels.toggle')}
-                          onClick={() => toggleMu.mutate(c.id)}
-                        >
-                          <Power className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          title={t('common.edit')}
-                          onClick={() => onEdit(c)}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          title={t('common.delete')}
-                          onClick={() => {
-                            if (confirm(t('channels.confirmDelete'))) deleteMu.mutate(c.id)
-                          }}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="text-blue-500 hover:text-blue-600 hover:bg-blue-500/10"
+                              onClick={() => testMu.mutate({ id: c.id, model: c.testModel })}
+                              disabled={testMu.isPending}
+                            >
+                              <Play className="h-4 w-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>{t('channels.test')}</TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className={c.status === 1 ? "text-emerald-500 hover:text-emerald-600 hover:bg-emerald-500/10" : "text-amber-500 hover:text-amber-600 hover:bg-amber-500/10"}
+                              onClick={() => toggleMu.mutate(c.id)}
+                            >
+                              <Power className="h-4 w-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>{t('channels.toggle')}</TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => onEdit(c)}
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>{t('common.edit')}</TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                              onClick={() => setDeleteId(c.id)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>{t('common.delete')}</TooltipContent>
+                        </Tooltip>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -317,8 +354,25 @@ export function ChannelsPage() {
         providers={providers}
         isEditing={isEditing}
         submitting={createMu.isPending || updateMu.isPending}
+        testing={testMu.isPending}
+        onTest={() => { if (form.id) testMu.mutate({ id: form.id, model: form.testModel }) }}
         onSubmit={onSubmit}
       />
+
+      <AlertDialog open={deleteId !== null} onOpenChange={(v) => !v && setDeleteId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('channels.confirmDelete')}</AlertDialogTitle>
+            <AlertDialogDescription>{t('channels.confirmDelete')}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('common.cancel', 'Cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { if (deleteId) deleteMu.mutate(deleteId) }}>
+              {t('common.delete', 'Delete')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
@@ -331,6 +385,8 @@ type EditorProps = {
   providers: ProviderMeta[]
   isEditing: boolean
   submitting: boolean
+  testing: boolean
+  onTest: () => void
   onSubmit: () => void
 }
 
@@ -342,6 +398,8 @@ function ChannelEditorDialog({
   providers,
   isEditing,
   submitting,
+  testing,
+  onTest,
   onSubmit,
 }: EditorProps) {
   const t = useI18n((s) => s.t)
@@ -487,6 +545,13 @@ function ChannelEditorDialog({
         </div>
 
         <DialogFooter>
+          {isEditing && (
+            <Button variant="outline" onClick={onTest} disabled={testing}>
+              {testing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {t('channels.test')}
+            </Button>
+          )}
+          <div className="flex-1" />
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             {t('common.cancel')}
           </Button>

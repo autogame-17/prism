@@ -83,12 +83,12 @@ export function DashboardPage() {
                   <Button variant="secondary" onClick={tunnel.rotate} disabled={tunnel.busy}>
                     <RefreshCw className="h-4 w-4" /> {t('dashboard.rotate')}
                   </Button>
-                  <Button variant="outline" onClick={tunnel.stop} disabled={tunnel.busy}>
+                  <Button variant="outline" onClick={tunnel.stop} disabled={tunnel.busy} className="border-amber-500/50 text-amber-600 hover:bg-amber-500/10 dark:text-amber-400">
                     <Square className="h-4 w-4" /> {t('dashboard.stop')}
                   </Button>
                 </>
               ) : (
-                <Button onClick={tunnel.start} disabled={tunnel.busy}>
+                <Button onClick={tunnel.start} disabled={tunnel.busy} className="bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm">
                   <Play className="h-4 w-4" /> {t('dashboard.start')}
                 </Button>
               )}
