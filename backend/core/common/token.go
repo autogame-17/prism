@@ -1,12 +1,15 @@
 package common
 
 import (
+	"embed"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"one-api/common/config"
 	"one-api/common/logger"
+	"strconv"
 	"strings"
 
 	"one-api/common/image"
@@ -21,7 +24,47 @@ var gpt35TokenEncoder *tiktoken.Tiktoken
 var gpt4TokenEncoder *tiktoken.Tiktoken
 var gpt4oTokenEncoder *tiktoken.Tiktoken
 
+//go:embed tiktoken/*
+var tiktokenFS embed.FS
+
+type embeddedBpeLoader struct{}
+
+func (l *embeddedBpeLoader) LoadTiktokenBpe(tiktokenBpeFile string) (map[string]int, error) {
+	var fileName string
+	if strings.Contains(tiktokenBpeFile, "cl100k_base") {
+		fileName = "tiktoken/cl100k_base.tiktoken"
+	} else if strings.Contains(tiktokenBpeFile, "o200k_base") {
+		fileName = "tiktoken/o200k_base.tiktoken"
+	}
+
+	if fileName != "" {
+		contents, err := tiktokenFS.ReadFile(fileName)
+		if err == nil {
+			bpeRanks := make(map[string]int)
+			for _, line := range strings.Split(string(contents), "\n") {
+				if line == "" {
+					continue
+				}
+				parts := strings.Split(line, " ")
+				token, err := base64.StdEncoding.DecodeString(parts[0])
+				if err != nil {
+					return nil, err
+				}
+				rank, err := strconv.Atoi(parts[1])
+				if err != nil {
+					return nil, err
+				}
+				bpeRanks[string(token)] = rank
+			}
+			return bpeRanks, nil
+		}
+	}
+
+	return tiktoken.NewDefaultBpeLoader().LoadTiktokenBpe(tiktokenBpeFile)
+}
+
 func InitTokenEncoders() {
+	tiktoken.SetBpeLoader(&embeddedBpeLoader{})
 	if viper.GetBool("disable_token_encoders") {
 		config.DisableTokenEncoders = true
 		logger.SysLog("token encoders disabled")

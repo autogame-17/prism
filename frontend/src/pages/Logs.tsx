@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Copy, Loader2, RefreshCw, Terminal } from 'lucide-react'
 import {
@@ -17,6 +17,8 @@ import {
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
+import { PrettyRequest, PrettyResponse } from '@/components/trace-pretty'
 import {
   Dialog,
   DialogContent,
@@ -259,6 +261,19 @@ function TraceDetailDialog({ id, onClose }: { id: number | null; onClose: () => 
     enabled: id !== null,
   })
   const d: TraceDetail | null = q.data ?? null
+  // Pretty 模式开关：默认开（同事场景里 cursor-opus-4-7 那种 200K+ 的请求体
+  // 直接看 raw 完全没法读）。两个开关相互独立，各自记进 localStorage 让用户
+  // 下次打开 Prism 还是同样的偏好；用 try/catch 保护因为某些 wails 嵌入环境
+  // 里 localStorage 可能受限。
+  const [reqPretty, setReqPretty] = useState<boolean>(() => readPref('prism.tracePretty.request', true))
+  const [respPretty, setRespPretty] = useState<boolean>(() => readPref('prism.tracePretty.response', true))
+  useEffect(() => {
+    writePref('prism.tracePretty.request', reqPretty)
+  }, [reqPretty])
+  useEffect(() => {
+    writePref('prism.tracePretty.response', respPretty)
+  }, [respPretty])
+
   const copy = (s: string) => {
     navigator.clipboard.writeText(s).then(
       () => toast.success(t('common.copied')),
@@ -292,8 +307,22 @@ function TraceDetailDialog({ id, onClose }: { id: number | null; onClose: () => 
                 {d.errorMessage}
               </div>
             )}
-            <BodyBlock title={t('logs.traces.request')} body={d.requestBody} onCopy={() => copy(d.requestBody)} />
-            <BodyBlock title={t('logs.traces.response')} body={d.responseBody} onCopy={() => copy(d.responseBody)} />
+            <BodyBlock
+              title={t('logs.traces.request')}
+              body={d.requestBody}
+              pretty={reqPretty}
+              onPrettyChange={setReqPretty}
+              renderPretty={(raw) => <PrettyRequest raw={raw} />}
+              onCopy={() => copy(d.requestBody)}
+            />
+            <BodyBlock
+              title={t('logs.traces.response')}
+              body={d.responseBody}
+              pretty={respPretty}
+              onPrettyChange={setRespPretty}
+              renderPretty={(raw) => <PrettyResponse raw={raw} />}
+              onCopy={() => copy(d.responseBody)}
+            />
           </div>
         )}
         <DialogFooter>
@@ -306,6 +335,25 @@ function TraceDetailDialog({ id, onClose }: { id: number | null; onClose: () => 
   )
 }
 
+function readPref(key: string, fallback: boolean): boolean {
+  try {
+    const v = localStorage.getItem(key)
+    if (v === '0') return false
+    if (v === '1') return true
+  } catch {
+    /* noop */
+  }
+  return fallback
+}
+
+function writePref(key: string, value: boolean) {
+  try {
+    localStorage.setItem(key, value ? '1' : '0')
+  } catch {
+    /* noop */
+  }
+}
+
 function Info({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex min-w-0 flex-col gap-0.5 rounded-md border bg-muted/40 p-2">
@@ -315,22 +363,55 @@ function Info({ label, value }: { label: string; value: string }) {
   )
 }
 
-function BodyBlock({ title, body, onCopy }: { title: string; body: string; onCopy: () => void }) {
+function BodyBlock({
+  title,
+  body,
+  pretty,
+  onPrettyChange,
+  renderPretty,
+  onCopy,
+}: {
+  title: string
+  body: string
+  pretty: boolean
+  onPrettyChange: (v: boolean) => void
+  renderPretty: (raw: string) => ReactNode
+  onCopy: () => void
+}) {
+  const t = useI18n((s) => s.t)
   const formatted = useMemo(() => prettyJSONOrRaw(body), [body])
   return (
     <div className="flex flex-col gap-1">
-      <div className="flex items-center justify-between text-xs font-medium">
+      <div className="flex items-center justify-between gap-2 text-xs font-medium">
         <span>
           {title}{' '}
           <span className="text-muted-foreground">({formatBytes(body.length)})</span>
         </span>
-        <Button size="sm" variant="outline" onClick={onCopy}>
-          Copy
-        </Button>
+        <div className="flex items-center gap-2">
+          <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground">
+            <Switch checked={pretty} onCheckedChange={onPrettyChange} />
+            <span>{t('logs.traces.pretty.toggle')}</span>
+          </label>
+          <Button size="sm" variant="outline" onClick={onCopy}>
+            Copy
+          </Button>
+        </div>
       </div>
-      <pre className="prism-selectable prism-scroll max-h-[28vh] overflow-auto whitespace-pre-wrap break-all rounded-md border border-border/60 bg-[#0b0e14] p-2 font-mono text-[11px] leading-5 text-slate-200">
-        {formatted || '—'}
-      </pre>
+      {pretty ? (
+        body ? (
+          <div className="prism-selectable prism-scroll max-h-[40vh] overflow-auto rounded-md border border-border/60 bg-[#0b0e14] p-2 text-slate-200">
+            {renderPretty(body)}
+          </div>
+        ) : (
+          <div className="rounded-md border border-border/60 bg-[#0b0e14] p-2 text-[11px] text-muted-foreground">
+            —
+          </div>
+        )
+      ) : (
+        <pre className="prism-selectable prism-scroll max-h-[28vh] overflow-auto whitespace-pre-wrap break-all rounded-md border border-border/60 bg-[#0b0e14] p-2 font-mono text-[11px] leading-5 text-slate-200">
+          {formatted || '—'}
+        </pre>
+      )}
     </div>
   )
 }

@@ -2,6 +2,7 @@ package tunnel
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -68,6 +69,15 @@ type Cloudflared struct {
 	currentURL string
 	startedAt  time.Time
 	lastError  string
+
+	// edgePinned, when true, makes Start() append `--edge <ip:7844>`
+	// for each entry in pinnedEdgeIPs so cloudflared bypasses its
+	// SRV-based edge discovery entirely. We flip this on inside the
+	// retry loop when the DNS preflight tells us the OS can't even
+	// resolve argotunnel.com (the classic TUN-proxy black-hole). The
+	// flag stays on for the lifetime of the manager so subsequent
+	// Rotate() calls keep using the working configuration.
+	edgePinned bool
 }
 
 // Status returns a snapshot of the current state. StartedAt is serialised as
@@ -83,6 +93,13 @@ type Snapshot struct {
 	// requires Cloudflare account + hostname), otherwise "trycloudflare"
 	// (random URL per Start, no account needed).
 	Mode string `json:"mode"`
+	// EdgePinned reports whether cloudflared is running in the
+	// fallback "skip DNS, dial pinned edge IPs" mode. This is only
+	// true after the DNS preflight failed and we successfully
+	// recovered by injecting --edge flags. The UI can use it to
+	// show a banner so the user knows their network needs fixing
+	// even if the tunnel itself is working.
+	EdgePinned bool `json:"edgePinned"`
 }
 
 func (c *Cloudflared) Snapshot() Snapshot {
@@ -104,6 +121,7 @@ func (c *Cloudflared) Snapshot() Snapshot {
 		LastError:  c.lastError,
 		BinaryPath: c.Binary,
 		Mode:       mode,
+		EdgePinned: c.edgePinned,
 	}
 }
 
@@ -133,10 +151,32 @@ func (c *Cloudflared) Start() error {
 	}
 	var cmd *exec.Cmd
 	if c.TunnelToken != "" {
-		cmd = exec.Command(c.Binary, "tunnel", "--no-autoupdate", "run", "--token", c.TunnelToken)
+		args := []string{"tunnel", "--no-autoupdate", "run"}
+		// Named-tunnel mode also benefits from the edge-pinned escape
+		// hatch when DNS is broken; the `--edge` flag is parsed by
+		// the parent `tunnel` command (not `run`), so it has to come
+		// before "run" in argv. cloudflared accepts repeated --edge
+		// occurrences and will round-robin across them internally.
+		if c.edgePinned {
+			edgeArgs := []string{}
+			for _, ip := range pinnedEdgeIPs {
+				edgeArgs = append(edgeArgs, "--edge", ip)
+			}
+			// Insert edge args after the leading "tunnel" subcommand.
+			args = append([]string{"tunnel"}, append(edgeArgs, args[1:]...)...)
+		}
+		args = append(args, "--token", c.TunnelToken)
+		cmd = exec.Command(c.Binary, args...)
 	} else {
+		args := []string{"tunnel"}
+		if c.edgePinned {
+			for _, ip := range pinnedEdgeIPs {
+				args = append(args, "--edge", ip)
+			}
+		}
 		url := fmt.Sprintf("http://127.0.0.1:%d", c.LocalPort)
-		cmd = exec.Command(c.Binary, "tunnel", "--url", url, "--no-autoupdate")
+		args = append(args, "--url", url, "--no-autoupdate")
+		cmd = exec.Command(c.Binary, args...)
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -202,8 +242,144 @@ func (c *Cloudflared) Start() error {
 
 // StartAndWaitURL starts the tunnel and blocks until a public URL is detected
 // or the timeout elapses.
+//
+// This is the entry point the UI uses, so it gets the resilience pass:
+//
+//  1. Run a DNS preflight against argotunnel.com SRV. If even the
+//     public-resolver fallbacks can't resolve it, we return early with
+//     a friendly message instead of letting cloudflared spawn just to
+//     time out 5s later with a stack trace in the log panel.
+//  2. If the very first launch produces no URL within `timeout`, retry
+//     up to maxAttempts-1 more times with exponential backoff. Each
+//     retry calls Stop() first so the wait goroutine has a chance to
+//     reap the zombie before we Start() again (Start() refuses if cmd
+//     is non-nil).
+//
+// The overall wall-clock cost is bounded: timeout per attempt + the
+// backoff between attempts, capped by maxAttempts. We deliberately do
+// NOT extend the timeout when retries kick in — a hung cloudflared
+// process won't get healthier with more time, only by being killed and
+// restarted.
 func (c *Cloudflared) StartAndWaitURL(timeout time.Duration) (string, error) {
+	return c.StartAndWaitURLWithRetry(timeout, 3)
+}
+
+// StartAndWaitURLWithRetry is the explicit form of StartAndWaitURL.
+// maxAttempts <= 0 collapses to a single attempt (no retry), matching
+// the historical behaviour for callers that want strict semantics.
+func (c *Cloudflared) StartAndWaitURLWithRetry(timeout time.Duration, maxAttempts int) (string, error) {
+	if maxAttempts < 1 {
+		maxAttempts = 1
+	}
+
+	// DNS preflight is meaningful for both trycloudflare and named-
+	// tunnel modes: in either case cloudflared has to resolve
+	// argotunnel.com on bootstrap. If even the public-resolver
+	// fallbacks can't answer, we don't fail — we flip into the
+	// edge-pinned escape hatch and retry, because cloudflared's
+	// `--edge <ip:7844>` lets it skip the SRV lookup entirely.
+	preflightOnce.Lock()
+	pctx, pcancel := context.WithTimeout(context.Background(), 12*time.Second)
+	res := preflightDNS(pctx, 3*time.Second)
+	pcancel()
+	preflightOnce.Unlock()
+	if c.LogWriter != nil {
+		_, _ = c.LogWriter.Write([]byte("[prism] " + res.String() + "\n"))
+	}
+	if !res.OK {
+		// Black-holed DNS: pin the edge IPs and let the retry loop
+		// below try again from scratch. We do NOT touch lastError
+		// here — Start() will clear it on the next attempt anyway,
+		// and lastError carries error-banner semantics which would
+		// confusingly stay red in the UI even after recovery. The
+		// UI uses Snapshot.EdgePinned (a separate field) to render
+		// the "网络受限，已使用边缘 IP 直连" advisory banner.
+		c.mu.Lock()
+		c.edgePinned = true
+		c.mu.Unlock()
+		if c.LogWriter != nil {
+			_, _ = c.LogWriter.Write([]byte(
+				"[prism] " + FriendlyDNSAdvice(res) + "\n" +
+					"[prism] DNS 不可用，启用 --edge 边缘 IP 直连模式（pinned " +
+					fmt.Sprintf("%d", len(pinnedEdgeIPs)) + " 个 IP）\n"))
+		}
+	}
+
+	// backoff schedule: 1s, 3s, 7s, ... (doubled+1). Capped at 10s so a
+	// pathological maxAttempts can't push the user into a 30s+ wait.
+	backoff := time.Second
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		url, err := c.startAndWaitURLOnce(timeout)
+		if err == nil {
+			return url, nil
+		}
+		lastErr = err
+		// fatal errors that retrying won't fix — bail immediately.
+		if errors.Is(err, errAlreadyRunning) || errors.Is(err, errBinaryMissing) {
+			return "", err
+		}
+		// Belt-and-suspenders: if we haven't already flipped to
+		// edge-pinned mode (e.g. preflight passed but cloudflared
+		// still can't reach the edge — happens when 53/udp works
+		// but 443 is blocked, or when the SRV resolver is fine but
+		// individual edge hostnames are blackholed), upgrade NOW
+		// before the next attempt. This costs nothing if pinned IPs
+		// are also unreachable: the next retry just fails the same
+		// way, and we surface the original error.
+		c.mu.Lock()
+		alreadyPinned := c.edgePinned
+		c.edgePinned = true
+		c.mu.Unlock()
+		if !alreadyPinned && c.LogWriter != nil {
+			_, _ = c.LogWriter.Write([]byte(
+				"[prism] cloudflared 无法连通 Cloudflare 边缘，切换到 --edge 直连模式后重试\n"))
+		}
+		if attempt == maxAttempts {
+			break
+		}
+		// Make sure the previous attempt's process is fully reaped
+		// before we Start() again. startAndWaitURLOnce already calls
+		// Stop on its own error path, but we re-Stop here to be
+		// defensive in case the process exited on its own (e.g.
+		// cloudflared self-quit on a temporary network blip).
+		_ = c.Stop()
+		c.waitForReap(5 * time.Second)
+		if c.LogWriter != nil {
+			_, _ = c.LogWriter.Write([]byte(fmt.Sprintf(
+				"[prism] tunnel attempt %d/%d failed: %v — retrying in %s\n",
+				attempt, maxAttempts, err, backoff,
+			)))
+		}
+		time.Sleep(backoff)
+		if backoff < 10*time.Second {
+			backoff = backoff*2 + time.Second
+			if backoff > 10*time.Second {
+				backoff = 10 * time.Second
+			}
+		}
+	}
+	return "", lastErr
+}
+
+var (
+	errAlreadyRunning = errors.New("already running")
+	errBinaryMissing  = errors.New("cloudflared binary not found")
+)
+
+func (c *Cloudflared) startAndWaitURLOnce(timeout time.Duration) (string, error) {
 	if err := c.Start(); err != nil {
+		// Normalise the two non-retriable failure modes so the retry
+		// loop above can short-circuit. Both are intrinsic to the
+		// install, not network conditions.
+		msg := err.Error()
+		if msg == "already running" {
+			return "", errAlreadyRunning
+		}
+		if len(msg) >= len("cloudflared binary not found") &&
+			msg[:len("cloudflared binary not found")] == "cloudflared binary not found" {
+			return "", errBinaryMissing
+		}
 		return "", err
 	}
 	deadline := time.Now().Add(timeout)
@@ -216,11 +392,39 @@ func (c *Cloudflared) StartAndWaitURL(timeout time.Duration) (string, error) {
 			return url, nil
 		}
 		if st == StatusError || st == StatusStopped {
-			return "", errors.New("cloudflared exited before producing a URL")
+			// Stop already happened on the wait goroutine; surface
+			// the error captured there if we have one.
+			c.mu.Lock()
+			le := c.lastError
+			c.mu.Unlock()
+			if le == "" {
+				le = "cloudflared exited before producing a URL"
+			}
+			return "", errors.New(le)
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
+	// Timeout: kill the in-flight process so the next retry's Start()
+	// doesn't bounce off "already running".
+	_ = c.Stop()
 	return "", errors.New("timeout waiting for cloudflared URL")
+}
+
+// waitForReap blocks until the wait goroutine has cleared c.cmd, or
+// until timeout elapses. It mirrors the polling loop in Rotate(); we
+// keep them duplicated rather than extracted so each call site stays
+// obvious about why it's waiting.
+func (c *Cloudflared) waitForReap(timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		c.mu.Lock()
+		gone := c.cmd == nil
+		c.mu.Unlock()
+		if gone {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 // Stop terminates the cloudflared process gracefully.

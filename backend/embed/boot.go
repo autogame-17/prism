@@ -24,6 +24,7 @@ import (
 	"one-api/router"
 
 	"prism/backend/prism/capture"
+	"prism/backend/prism/identity"
 	"prism/backend/prism/trace"
 )
 
@@ -107,6 +108,15 @@ func Boot(opts BootOptions) (*BootResult, error) {
 
 	if err := trace.Init(); err != nil {
 		return nil, fmt.Errorf("init prism trace table: %w", err)
+	}
+
+	// Device id underpins the per-request x-request-id (prism-<dev>-<ms>).
+	// We persist it in the data dir rather than on the user row because
+	// the relevant scope is "this Prism install", not "this account".
+	if devID, err := identity.Init(paths.DataDir); err != nil {
+		logger.SysError(fmt.Sprintf("init prism device id: %v", err))
+	} else {
+		logger.SysLog(fmt.Sprintf("prism device id: %s", devID))
 	}
 
 	model.InitOptionMap()

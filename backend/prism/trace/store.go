@@ -16,14 +16,36 @@ import (
 )
 
 // Entry is a single captured proxy round-trip.
+//
+// Diagnostic fields (RequestID/DeviceID/ChunkCount/FirstChunkAt/LastChunkAt/
+// Finished/FinishReason) exist so that when a streaming SSE response gets
+// truncated mid-flight the row still carries enough breadcrumbs to tell
+// "stream broke after N chunks at Tms" apart from "upstream returned empty
+// from the start". Without them the only visible symptom is
+// `response_body=""` and there is no way to attribute the loss.
 type Entry struct {
-	ID            int64  `json:"id" gorm:"primaryKey;autoIncrement"`
-	CreatedAt     int64  `json:"createdAt" gorm:"index"`
-	Method        string `json:"method" gorm:"type:varchar(16)"`
-	Path          string `json:"path" gorm:"type:varchar(256);index"`
-	Status        int    `json:"status" gorm:"index"`
-	DurationMs    int64  `json:"durationMs"`
-	IsStream      bool   `json:"isStream"`
+	ID         int64  `json:"id" gorm:"primaryKey;autoIncrement"`
+	CreatedAt  int64  `json:"createdAt" gorm:"index"`
+	RequestID  string `json:"requestId" gorm:"type:varchar(96);index"`
+	DeviceID   string `json:"deviceId" gorm:"type:varchar(32);index"`
+	Method     string `json:"method" gorm:"type:varchar(16)"`
+	Path       string `json:"path" gorm:"type:varchar(256);index"`
+	Status     int    `json:"status" gorm:"index"`
+	DurationMs int64  `json:"durationMs"`
+	IsStream   bool   `json:"isStream"`
+	// Finished is true once the upstream handler returned cleanly. False
+	// rows mean the stream was still in flight when the row was last
+	// flushed (process exit, client disconnect, panic, ...). Combined with
+	// LastChunkAt, downstream tools can confidently mark a record as
+	// "truncated" instead of "empty response".
+	Finished bool `json:"finished" gorm:"index"`
+	// FinishReason mirrors the OpenAI-style finish_reason of the LAST SSE
+	// chunk we observed before the stream ended (stop / tool_calls /
+	// length / "" if unknown).
+	FinishReason  string `json:"finishReason" gorm:"type:varchar(32)"`
+	ChunkCount    int    `json:"chunkCount"`
+	FirstChunkAt  int64  `json:"firstChunkAt"`
+	LastChunkAt   int64  `json:"lastChunkAt"`
 	ChannelID     int    `json:"channelId" gorm:"index"`
 	ChannelType   int    `json:"channelType"`
 	ChannelName   string `json:"channelName" gorm:"type:varchar(128)"`
@@ -72,17 +94,137 @@ func Save(ctx context.Context, e *Entry) error {
 	return onehubmodel.DB.WithContext(ctx).Create(e).Error
 }
 
+// OpenStream inserts a placeholder row at the moment a streaming response
+// starts. We persist as much routing context as we already know (method,
+// path, channel, model, request body) so even if the process is killed
+// mid-stream we still have a row to investigate.
+//
+// The returned ID is the autoincrement primary key — callers pass it back
+// to AppendChunk/Finalize so we never have to re-query by request_id.
+func OpenStream(ctx context.Context, e *Entry) (int64, error) {
+	if onehubmodel.DB == nil {
+		return 0, errors.New("onehub DB is not ready")
+	}
+	if e.CreatedAt == 0 {
+		e.CreatedAt = time.Now().Unix()
+	}
+	if err := onehubmodel.DB.WithContext(ctx).Create(e).Error; err != nil {
+		return 0, err
+	}
+	return e.ID, nil
+}
+
+// StreamChunkUpdate carries an incremental flush. Callers pass the full
+// accumulated body (already capped to maxBodyBytes by the middleware) so
+// readers always see a self-consistent prefix. We deliberately overwrite
+// rather than append at the SQL layer because gorm's column-level
+// concatenation is dialect-specific and SQLite's `||` semantics differ
+// from MySQL's `CONCAT`. One write of N bytes per chunk is acceptable in
+// the desktop single-user workload (sub-MB rows, low QPS).
+type StreamChunkUpdate struct {
+	ResponseBody  string
+	ResponseBytes int64
+	ChunkCount    int
+	FirstChunkAt  int64
+	LastChunkAt   int64
+}
+
+// AppendChunk applies an incremental update for a streaming row. id == 0
+// is treated as a no-op so callers in non-streaming paths can use the
+// same code shape without a nil check.
+func AppendChunk(ctx context.Context, id int64, u StreamChunkUpdate) error {
+	if onehubmodel.DB == nil {
+		return errors.New("onehub DB is not ready")
+	}
+	if id == 0 {
+		return nil
+	}
+	updates := map[string]any{
+		"response_body":  u.ResponseBody,
+		"response_bytes": u.ResponseBytes,
+		"chunk_count":    u.ChunkCount,
+		"last_chunk_at":  u.LastChunkAt,
+	}
+	if u.FirstChunkAt > 0 {
+		updates["first_chunk_at"] = u.FirstChunkAt
+	}
+	return onehubmodel.DB.WithContext(ctx).
+		Model(&Entry{}).
+		Where("id = ?", id).
+		Updates(updates).Error
+}
+
+// FinalizeStreamUpdate is the terminal patch applied once the upstream
+// handler returns (cleanly or with an error). It is also safe to call on
+// a non-streaming row: the streaming-only fields stay at their zero values.
+type FinalizeStreamUpdate struct {
+	Status        int
+	DurationMs    int64
+	ResponseBody  string
+	ResponseBytes int64
+	ContentType   string
+	IsStream      bool
+	ChannelID     int
+	ChannelType   int
+	ChannelName   string
+	Model         string
+	ChunkCount    int
+	FirstChunkAt  int64
+	LastChunkAt   int64
+	Finished      bool
+	FinishReason  string
+	ErrorMessage  string
+}
+
+// Finalize writes the terminal state of a row created by OpenStream.
+func Finalize(ctx context.Context, id int64, u FinalizeStreamUpdate) error {
+	if onehubmodel.DB == nil {
+		return errors.New("onehub DB is not ready")
+	}
+	if id == 0 {
+		return nil
+	}
+	updates := map[string]any{
+		"status":         u.Status,
+		"duration_ms":    u.DurationMs,
+		"response_body":  u.ResponseBody,
+		"response_bytes": u.ResponseBytes,
+		"content_type":   u.ContentType,
+		"is_stream":      u.IsStream,
+		"channel_id":     u.ChannelID,
+		"channel_type":   u.ChannelType,
+		"channel_name":   u.ChannelName,
+		"model":          u.Model,
+		"chunk_count":    u.ChunkCount,
+		"last_chunk_at":  u.LastChunkAt,
+		"finished":       u.Finished,
+		"finish_reason":  u.FinishReason,
+		"error_message":  u.ErrorMessage,
+	}
+	if u.FirstChunkAt > 0 {
+		updates["first_chunk_at"] = u.FirstChunkAt
+	}
+	return onehubmodel.DB.WithContext(ctx).
+		Model(&Entry{}).
+		Where("id = ?", id).
+		Updates(updates).Error
+}
+
 // ListQuery is the paginated filter shape used by the bindings.
 type ListQuery struct {
-	Page        int
-	PageSize    int
-	Keyword     string
-	ChannelID   int
-	Model       string
-	TokenName   string
-	OnlyErrors  bool
-	StartUnix   int64
-	EndUnix     int64
+	Page       int
+	PageSize   int
+	Keyword    string
+	ChannelID  int
+	Model      string
+	TokenName  string
+	OnlyErrors bool
+	// OnlyTruncated narrows results to streaming rows that never reached a
+	// clean finish. Useful when investigating "no response" reports.
+	OnlyTruncated bool
+	RequestID     string
+	StartUnix     int64
+	EndUnix       int64
 }
 
 // ListResult is the paginated response shape. RequestBody/ResponseBody are
@@ -119,6 +261,15 @@ func List(ctx context.Context, q ListQuery) (*ListResult, error) {
 	if q.OnlyErrors {
 		db = db.Where("status >= 400 OR error_message <> ''")
 	}
+	if q.OnlyTruncated {
+		// is_stream=true AND finished=false captures the exact "stream
+		// started but never closed cleanly" case; the request_body is
+		// already there for context.
+		db = db.Where("is_stream = ? AND finished = ?", true, false)
+	}
+	if q.RequestID != "" {
+		db = db.Where("request_id = ?", q.RequestID)
+	}
 	if q.StartUnix > 0 {
 		db = db.Where("created_at >= ?", q.StartUnix)
 	}
@@ -137,7 +288,8 @@ func List(ctx context.Context, q ListQuery) (*ListResult, error) {
 
 	var rows []Entry
 	err := db.Select(
-		"id, created_at, method, path, status, duration_ms, is_stream, "+
+		"id, created_at, request_id, device_id, method, path, status, duration_ms, "+
+			"is_stream, finished, finish_reason, chunk_count, first_chunk_at, last_chunk_at, "+
 			"channel_id, channel_type, channel_name, token_name, model, "+
 			"client_ip, error_message, content_type, request_bytes, response_bytes",
 	).Order("id DESC").

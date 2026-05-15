@@ -27,11 +27,18 @@ func (a *TracesAPI) SetContext(ctx context.Context) {
 type TraceSummary struct {
 	ID            int64  `json:"id"`
 	CreatedAt     int64  `json:"createdAt"`
+	RequestID     string `json:"requestId"`
+	DeviceID      string `json:"deviceId"`
 	Method        string `json:"method"`
 	Path          string `json:"path"`
 	Status        int    `json:"status"`
 	DurationMs    int64  `json:"durationMs"`
 	IsStream      bool   `json:"isStream"`
+	Finished      bool   `json:"finished"`
+	FinishReason  string `json:"finishReason"`
+	ChunkCount    int    `json:"chunkCount"`
+	FirstChunkAt  int64  `json:"firstChunkAt"`
+	LastChunkAt   int64  `json:"lastChunkAt"`
 	ChannelID     int    `json:"channelId"`
 	ChannelName   string `json:"channelName"`
 	TokenName     string `json:"tokenName"`
@@ -52,15 +59,17 @@ type TraceDetail struct {
 
 // TracesListRequest is the paginated filter payload.
 type TracesListRequest struct {
-	Page       int    `json:"page"`
-	PageSize   int    `json:"pageSize"`
-	Keyword    string `json:"keyword"`
-	ChannelID  int    `json:"channelId"`
-	Model      string `json:"model"`
-	TokenName  string `json:"tokenName"`
-	OnlyErrors bool   `json:"onlyErrors"`
-	StartUnix  int64  `json:"startUnix"`
-	EndUnix    int64  `json:"endUnix"`
+	Page          int    `json:"page"`
+	PageSize      int    `json:"pageSize"`
+	Keyword       string `json:"keyword"`
+	ChannelID     int    `json:"channelId"`
+	Model         string `json:"model"`
+	TokenName     string `json:"tokenName"`
+	OnlyErrors    bool   `json:"onlyErrors"`
+	OnlyTruncated bool   `json:"onlyTruncated"`
+	RequestID     string `json:"requestId"`
+	StartUnix     int64  `json:"startUnix"`
+	EndUnix       int64  `json:"endUnix"`
 }
 
 // TracesListResponse is the paginated response.
@@ -78,39 +87,24 @@ func (a *TracesAPI) List(req TracesListRequest) (*TracesListResponse, error) {
 		ctx = context.Background()
 	}
 	res, err := trace.List(ctx, trace.ListQuery{
-		Page:       req.Page,
-		PageSize:   req.PageSize,
-		Keyword:    req.Keyword,
-		ChannelID:  req.ChannelID,
-		Model:      req.Model,
-		TokenName:  req.TokenName,
-		OnlyErrors: req.OnlyErrors,
-		StartUnix:  req.StartUnix,
-		EndUnix:    req.EndUnix,
+		Page:          req.Page,
+		PageSize:      req.PageSize,
+		Keyword:       req.Keyword,
+		ChannelID:     req.ChannelID,
+		Model:         req.Model,
+		TokenName:     req.TokenName,
+		OnlyErrors:    req.OnlyErrors,
+		OnlyTruncated: req.OnlyTruncated,
+		RequestID:     req.RequestID,
+		StartUnix:     req.StartUnix,
+		EndUnix:       req.EndUnix,
 	})
 	if err != nil {
 		return nil, err
 	}
 	items := make([]TraceSummary, 0, len(res.Items))
 	for _, e := range res.Items {
-		items = append(items, TraceSummary{
-			ID:            e.ID,
-			CreatedAt:     e.CreatedAt,
-			Method:        e.Method,
-			Path:          e.Path,
-			Status:        e.Status,
-			DurationMs:    e.DurationMs,
-			IsStream:      e.IsStream,
-			ChannelID:     e.ChannelID,
-			ChannelName:   e.ChannelName,
-			TokenName:     e.TokenName,
-			Model:         e.Model,
-			ClientIP:      e.ClientIP,
-			ContentType:   e.ContentType,
-			RequestBytes:  e.RequestBytes,
-			ResponseBytes: e.ResponseBytes,
-			ErrorMessage:  e.ErrorMessage,
-		})
+		items = append(items, toSummary(e))
 	}
 	return &TracesListResponse{
 		Items:    items,
@@ -131,27 +125,41 @@ func (a *TracesAPI) Get(id int64) (*TraceDetail, error) {
 		return nil, err
 	}
 	return &TraceDetail{
-		TraceSummary: TraceSummary{
-			ID:            e.ID,
-			CreatedAt:     e.CreatedAt,
-			Method:        e.Method,
-			Path:          e.Path,
-			Status:        e.Status,
-			DurationMs:    e.DurationMs,
-			IsStream:      e.IsStream,
-			ChannelID:     e.ChannelID,
-			ChannelName:   e.ChannelName,
-			TokenName:     e.TokenName,
-			Model:         e.Model,
-			ClientIP:      e.ClientIP,
-			ContentType:   e.ContentType,
-			RequestBytes:  e.RequestBytes,
-			ResponseBytes: e.ResponseBytes,
-			ErrorMessage:  e.ErrorMessage,
-		},
+		TraceSummary: toSummary(*e),
 		RequestBody:  e.RequestBody,
 		ResponseBody: e.ResponseBody,
 	}, nil
+}
+
+// toSummary projects a trace.Entry into the binding-facing summary.
+// Kept private to this package; the binding generator picks up only
+// exported names.
+func toSummary(e trace.Entry) TraceSummary {
+	return TraceSummary{
+		ID:            e.ID,
+		CreatedAt:     e.CreatedAt,
+		RequestID:     e.RequestID,
+		DeviceID:      e.DeviceID,
+		Method:        e.Method,
+		Path:          e.Path,
+		Status:        e.Status,
+		DurationMs:    e.DurationMs,
+		IsStream:      e.IsStream,
+		Finished:      e.Finished,
+		FinishReason:  e.FinishReason,
+		ChunkCount:    e.ChunkCount,
+		FirstChunkAt:  e.FirstChunkAt,
+		LastChunkAt:   e.LastChunkAt,
+		ChannelID:     e.ChannelID,
+		ChannelName:   e.ChannelName,
+		TokenName:     e.TokenName,
+		Model:         e.Model,
+		ClientIP:      e.ClientIP,
+		ContentType:   e.ContentType,
+		RequestBytes:  e.RequestBytes,
+		ResponseBytes: e.ResponseBytes,
+		ErrorMessage:  e.ErrorMessage,
+	}
 }
 
 // PurgeOlderThan deletes traces older than the given unix timestamp (0 = all).

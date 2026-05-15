@@ -1,0 +1,6 @@
+# Anything not needed for `docker build` of the sandbox image stays out
+# so we get a tiny build context. The actual app code is bind-mounted at
+# runtime, NOT baked into the image.
+*
+!Dockerfile
+!docker-entrypoint.sh
