@@ -57,8 +57,10 @@ start_container() {
   #   one node_modules across both OSes blows up either build. Named volumes
   #   give the container its own writable layer that survives between runs
   #   (so `pnpm install` only happens once) but never leaks back to the host.
-  # - build/ (where wails writes the linux binary) is also a named volume
-  #   to keep the build cache around.
+  # - build/bin (where wails writes the linux binary) is also a named volume
+  #   to keep the build cache around. Do NOT mount all of build/, because
+  #   main.go embeds build/trayicon-template.png and a volume on build/ would
+  #   hide that source asset from go:embed.
   docker run -d \
     --name "$CONTAINER" \
     -p "127.0.0.1:${HOST_PORT}:6080" \
@@ -66,7 +68,7 @@ start_container() {
     -v "$REPO_ROOT:/workspace" \
     -v prism-e2e-node-modules:/workspace/frontend/node_modules \
     -v prism-e2e-wailsjs:/workspace/frontend/wailsjs \
-    -v prism-e2e-build:/workspace/build \
+    -v prism-e2e-build-bin:/workspace/build/bin \
     -v prism-e2e-go-cache:/root/go \
     "$IMAGE" >/dev/null
 }
@@ -74,7 +76,7 @@ start_container() {
 wait_ready() {
   log "waiting for noVNC to come up (max 120s)"
   for _ in $(seq 1 120); do
-    if curl -fsS -o /dev/null "http://127.0.0.1:${HOST_PORT}/" 2>/dev/null; then
+    if curl --noproxy '*' -fsS -o /dev/null "http://127.0.0.1:${HOST_PORT}/" 2>/dev/null; then
       log "noVNC ready"
       break
     fi

@@ -12,8 +12,9 @@
 #     interaction sequence without baking the test into the image.
 #   - Build deps for Wails v2 on Linux: GTK3 + WebKit2GTK 4.1 (Ubuntu 24.04
 #     ships 4.1 only, so projects must build with `-tags webkit2_41`).
-#   - Go 1.25, Node 22 LTS, pnpm — pinned versions match prism-desktop's
-#     go.mod / package.json so the in-container build matches the host build.
+#   - Go 1.25, Node.js, pnpm — pinned tool versions where the project needs
+#     reproducible behavior; Node comes from Ubuntu to avoid flaky external
+#     installer scripts during sandbox rebuilds.
 #
 # Reuse for other Linux GUI projects:
 #   1. Replace e2e-sandbox/launchers/prism.sh with your project's launcher.
@@ -39,13 +40,17 @@ ENV DEBIAN_FRONTEND=noninteractive \
 #   without going through noVNC.
 # - dbus-x11: WebKit needs dbus session running.
 # - sqlite3: tests inspect the prism_traces table.
+# - fonts-noto-cjk: Linux GUI sandboxes otherwise render Chinese/Japanese/
+#   Korean text as blank boxes or invisible glyphs in WebKit/GTK apps.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl wget git build-essential pkg-config \
+        nodejs npm \
         xvfb x11vnc fluxbox xdotool wmctrl imagemagick \
         novnc websockify \
         dbus-x11 \
         libgtk-3-dev libwebkit2gtk-4.1-dev \
         libnss3 libasound2t64 \
+        fonts-noto-cjk \
         sqlite3 \
         ca-certificates && \
     rm -rf /var/lib/apt/lists/*
@@ -59,11 +64,12 @@ RUN ARCH=$(dpkg --print-architecture) && \
     rm /tmp/go.tgz && \
     /usr/local/go/bin/go version
 
-# Node 22 LTS via NodeSource. Wails frontend uses pnpm; we install corepack-managed pnpm.
-RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
-    apt-get install -y --no-install-recommends nodejs && \
-    rm -rf /var/lib/apt/lists/* && \
-    corepack enable
+# Wails frontend uses pnpm. Install pnpm directly instead of using Corepack's
+# moving defaults; this keeps non-interactive esbuild installs predictable.
+ARG PNPM_VERSION=10.33.0
+RUN npm install -g pnpm@${PNPM_VERSION} && \
+    node --version && \
+    pnpm --version
 
 # Wails v2 CLI — pinned to the version the project uses.
 ARG WAILS_VERSION=v2.12.0

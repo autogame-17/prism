@@ -20,9 +20,25 @@ log() { printf '[prism %s] %s\n' "$(date +%H:%M:%S)" "$*" >&2; }
 export XDG_CONFIG_HOME=/tmp/prism-config
 export XDG_DATA_HOME=/tmp/prism-data
 export XDG_CACHE_HOME=/tmp/prism-cache
+export CI=true
 mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_CACHE_HOME"
 
 cd /workspace
+
+# Use the pnpm version pinned in the sandbox image. Corepack's default
+# "latest" pulled pnpm 11 in the container, whose strict dependency build
+# approval blocks esbuild in non-interactive mode. We preinstall with explicit
+# settings into the container-only node_modules volume so Wails' later
+# `frontend:install` becomes a no-op.
+log "preparing frontend dependencies in container-local node_modules"
+(
+  cd frontend
+  pnpm install --frozen-lockfile=false --ignore-scripts=false \
+      --store-dir /workspace/frontend/node_modules/.pnpm-store \
+      --dangerously-allow-all-builds \
+      --config.strict-dep-builds=false --config.confirmModulesPurge=false \
+      2>&1 | sed 's/^/[pnpm] /'
+)
 
 # Build the frontend + backend if the binary is missing or stale. We rely
 # on `wails build` for incremental rebuilds; it caches under build/.
@@ -31,6 +47,9 @@ need_build=0
 if [[ ! -x "$BINARY" ]]; then
   need_build=1
 elif [[ "$BINARY" -ot main.go ]] || [[ "$BINARY" -ot wails.json ]]; then
+  need_build=1
+elif find frontend/src frontend/index.html frontend/package.json frontend/pnpm-lock.yaml \
+      -type f -newer "$BINARY" -print -quit 2>/dev/null | grep -q .; then
   need_build=1
 fi
 
@@ -52,12 +71,14 @@ if [[ ! -x "$BINARY" ]]; then
 fi
 
 # Mark a "ready" file the test harness polls before sending xdotool input.
-# The Wails app boots its embedded gin server on 127.0.0.1:39527; once
-# that port is listening, the UI is ready to interact with.
+# The Wails app boots its embedded gin server on 127.0.0.1:39527. There is
+# no dedicated /ping route, so any HTTP status other than curl's 000 means
+# the socket is accepting requests and the app has passed backend boot.
 (
   for _ in $(seq 1 60); do
-    if curl -fsS -o /dev/null http://127.0.0.1:39527/ping 2>&1; then
-      log "embedded gin server is up"
+    code="$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:39527/ping 2>/dev/null || true)"
+    if [[ "$code" != "000" ]]; then
+      log "embedded gin server is up (probe status=$code)"
       touch /tmp/prism-ready
       break
     fi
