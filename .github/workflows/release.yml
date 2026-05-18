@@ -1,0 +1,246 @@
+name: release
+
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to publish (e.g. v0.1.1). Must already be pushed.'
+        required: true
+        type: string
+      platforms:
+        description: 'Which platforms to build (comma-separated subset of darwin-universal,windows-amd64,linux-amd64). Empty = all.'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: darwin-universal
+            os: macos-14
+            platform: darwin/universal
+            artefact_glob: 'dist/Prism-*-darwin-universal.*'
+          - name: windows-amd64
+            os: windows-2022
+            platform: windows/amd64
+            artefact_glob: 'dist/Prism-*-windows-amd64*'
+          - name: linux-amd64
+            os: ubuntu-22.04
+            platform: linux/amd64
+            artefact_glob: 'dist/Prism-*-linux-amd64*'
+    steps:
+      - name: Decide whether to run this matrix slot
+        id: gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          REQUESTED="${{ github.event.inputs.platforms }}"
+          THIS="${{ matrix.name }}"
+          if [[ -z "$REQUESTED" ]]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "Running $THIS (no platforms filter)."
+          elif [[ ",$REQUESTED," == *",$THIS,"* ]]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "Running $THIS (matched platforms filter)."
+          else
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Skipping $THIS (not in platforms='$REQUESTED')."
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.skip != 'true'
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: actions/setup-go@v5
+        if: steps.gate.outputs.skip != 'true'
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - uses: actions/setup-node@v4
+        if: steps.gate.outputs.skip != 'true'
+        with:
+          node-version: '20'
+
+      - name: Install pnpm
+        if: steps.gate.outputs.skip != 'true'
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: Install Linux WebKitGTK deps
+        if: steps.gate.outputs.skip != 'true' && runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev
+
+      - name: Install Wails CLI
+        if: steps.gate.outputs.skip != 'true'
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      - name: Fetch cloudflared binaries
+        if: steps.gate.outputs.skip != 'true'
+        shell: bash
+        run: ./scripts/fetch_cloudflared.sh
+
+      - name: Install frontend deps
+        if: steps.gate.outputs.skip != 'true'
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile=false
+
+      - name: Determine version
+        if: steps.gate.outputs.skip != 'true'
+        id: ver
+        shell: bash
+        run: |
+          if [[ -n "${{ inputs.tag }}" ]]; then
+            VERSION="${{ inputs.tag }}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building $VERSION"
+
+      # ---- macOS ----
+      - name: Build (darwin/universal)
+        if: steps.gate.outputs.skip != 'true' && runner.os == 'macOS'
+        run: wails build -platform darwin/universal -clean
+
+      - name: Package macOS dmg + zip
+        if: steps.gate.outputs.skip != 'true' && runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          V="${{ steps.ver.outputs.version }}"
+
+          ditto -c -k --keepParent build/bin/Prism.app "dist/Prism-${V}-darwin-universal.zip"
+
+          STAGE="$(mktemp -d)"
+          cp -R build/bin/Prism.app "$STAGE/"
+          ln -s /Applications "$STAGE/Applications"
+          hdiutil create \
+            -volname "Prism ${V}" \
+            -srcfolder "$STAGE" \
+            -ov -format UDZO -fs HFS+ \
+            "dist/Prism-${V}-darwin-universal.dmg"
+          rm -rf "$STAGE"
+
+      # ---- Windows ----
+      - name: Build (windows/amd64) with NSIS
+        if: steps.gate.outputs.skip != 'true' && runner.os == 'Windows'
+        run: wails build -platform windows/amd64 -nsis -clean
+
+      - name: Package Windows artefacts
+        if: steps.gate.outputs.skip != 'true' && runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          V="${{ steps.ver.outputs.version }}"
+
+          cp build/bin/Prism-amd64-installer.exe "dist/Prism-${V}-windows-amd64-installer.exe"
+          (cd build/bin && powershell Compress-Archive -Path Prism.exe -DestinationPath "../../dist/Prism-${V}-windows-amd64.zip" -Force)
+
+      # ---- Linux ----
+      - name: Build (linux/amd64)
+        if: steps.gate.outputs.skip != 'true' && runner.os == 'Linux'
+        run: wails build -platform linux/amd64 -tags webkit2_41 -clean
+
+      - name: Package Linux tarball
+        if: steps.gate.outputs.skip != 'true' && runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          V="${{ steps.ver.outputs.version }}"
+
+          tar -C build/bin -czf "dist/Prism-${V}-linux-amd64.tar.gz" Prism
+
+      # ---- Common: checksums + upload ----
+      - name: Generate per-platform SHA256
+        if: steps.gate.outputs.skip != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          # Windows Git Bash ships sha256sum (MinGW coreutils) but no shasum (no Perl).
+          # macOS ships shasum (Perl) but no sha256sum. Linux usually has both.
+          # Both produce identical "<hex>  <file>" output.
+          if command -v shasum >/dev/null 2>&1; then
+            shasum -a 256 Prism-* > "SHA256SUMS-${{ matrix.name }}.txt"
+          elif command -v sha256sum >/dev/null 2>&1; then
+            # --text forces "<hash>  <file>" output (two spaces, no `*` marker)
+            # matching shasum's default, so all per-platform sums files share
+            # one format and the aggregator's `sort -k2` orders them uniformly.
+            sha256sum --text Prism-* > "SHA256SUMS-${{ matrix.name }}.txt"
+          else
+            echo "neither shasum nor sha256sum is available on this runner" >&2
+            exit 1
+          fi
+          cat "SHA256SUMS-${{ matrix.name }}.txt"
+
+      - name: Upload to GitHub Release
+        if: steps.gate.outputs.skip != 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.version }}
+          files: |
+            ${{ matrix.artefact_glob }}
+            dist/SHA256SUMS-${{ matrix.name }}.txt
+          fail_on_unmatched_files: true
+          generate_release_notes: false
+
+  finalize:
+    name: Aggregate SHA256SUMS
+    runs-on: ubuntu-22.04
+    needs: build
+    # Only aggregate on full builds (tag push) or explicit full workflow_dispatch.
+    # Partial dispatches (single-platform top-ups) should leave the existing
+    # SHA256SUMS.txt alone.
+    if: always() && needs.build.result == 'success' && (github.event_name == 'push' || github.event.inputs.platforms == '')
+    permissions:
+      contents: write
+    steps:
+      - name: Determine version
+        id: ver
+        run: |
+          if [[ -n "${{ inputs.tag }}" ]]; then
+            echo "version=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download all SHA256SUMS-*.txt from release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p sums
+          gh release download "${{ steps.ver.outputs.version }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --dir sums \
+            --pattern 'SHA256SUMS-*.txt'
+          ls sums/
+
+      - name: Combine into SHA256SUMS.txt
+        run: |
+          cat sums/SHA256SUMS-*.txt | sort -k2 > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Upload combined SHA256SUMS.txt
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.version }}
+          files: SHA256SUMS.txt

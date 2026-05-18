@@ -1,0 +1,18 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "Prism",
+  "outputfilename": "Prism",
+  "frontend:install": "pnpm install",
+  "frontend:build": "pnpm run build",
+  "frontend:dev:watcher": "pnpm run dev",
+  "frontend:dev:serverUrl": "auto",
+  "author": {
+    "name": "Prism",
+    "email": "noreply@prism.local"
+  },
+  "info": {
+    "productName": "Prism",
+    "productVersion": "0.1.5",
+    "copyright": "© 2026 Prism"
+  }
+}

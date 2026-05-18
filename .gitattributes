@@ -1,0 +1,9 @@
+# Embedded tiktoken BPE files are LF-line text resources read at runtime via
+# strings.Split on "\n". On Windows, git's autocrlf would convert them to CRLF
+# at checkout, which broke strconv.Atoi on the rank column. Treat them as
+# binary so git never touches their bytes.
+*.tiktoken binary
+
+# Frontend lockfiles + go.sum: keep LF universally so hash checks stay stable.
+go.sum text eol=lf
+pnpm-lock.yaml text eol=lf
