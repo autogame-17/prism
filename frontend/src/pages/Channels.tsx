@@ -74,6 +74,7 @@ export function ChannelsPage() {
   const [editorOpen, setEditorOpen] = useState(false)
   const [form, setForm] = useState<ChannelFormState>(emptyForm(1))
   const [isEditing, setIsEditing] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<ChannelSummary | null>(null)
 
   const providersQ = useQuery({
     queryKey: ['provider-types'],
@@ -113,6 +114,10 @@ export function ChannelsPage() {
     mutationFn: (id: number) => channelsDelete(id),
     onSuccess: () => {
       toast.success(t('channels.deleteOk'))
+      setDeleteTarget(null)
+      if ((listQ.data?.items.length ?? 0) <= 1 && page > 1) {
+        setPage((p) => Math.max(1, p - 1))
+      }
       qc.invalidateQueries({ queryKey: ['channels'] })
     },
     onError: (err: unknown) => toast.error(String(err)),
@@ -271,11 +276,14 @@ export function ChannelsPage() {
                           variant="ghost"
                           size="icon"
                           title={t('common.delete')}
-                          onClick={() => {
-                            if (confirm(t('channels.confirmDelete'))) deleteMu.mutate(c.id)
-                          }}
+                          onClick={() => setDeleteTarget(c)}
+                          disabled={deleteMu.isPending && deleteTarget?.id === c.id}
                         >
-                          <Trash2 className="h-4 w-4" />
+                          {deleteMu.isPending && deleteTarget?.id === c.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-4 w-4" />
+                          )}
                         </Button>
                       </div>
                     </TableCell>
@@ -320,6 +328,35 @@ export function ChannelsPage() {
         submitting={createMu.isPending || updateMu.isPending}
         onSubmit={onSubmit}
       />
+
+      <Dialog open={deleteTarget !== null} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <DialogContent className="w-[min(90vw,420px)]">
+          <DialogHeader>
+            <DialogTitle>{t('common.delete')}</DialogTitle>
+            <DialogDescription className="break-words">
+              {t('channels.confirmDelete')}
+              {deleteTarget?.name ? ` (${deleteTarget.name})` : ''}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteTarget(null)}
+              disabled={deleteMu.isPending}
+            >
+              {t('common.cancel')}
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => deleteTarget && deleteMu.mutate(deleteTarget.id)}
+              disabled={deleteMu.isPending || deleteTarget === null}
+            >
+              {deleteMu.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {t('common.delete')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
