@@ -62,7 +62,7 @@ const PROVIDER_PRESETS: Record<number, ProviderPreset> = {
     key: 'local-claude',
     baseURL: '',
     other: '',
-    models: 'sonnet,opus,haiku',
+    models: 'sonnet,opus,haiku,claude-sonnet-4-5-20250929,claude-opus-4-1-20250805,claude-haiku-4-5-20251001',
     testModel: 'sonnet',
   },
 }
@@ -224,6 +224,7 @@ export function ChannelsPage() {
   const total = listQ.data?.total ?? 0
   const pageSize = listQ.data?.pageSize ?? 20
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
+  const testingChannelId = testMu.isPending ? testMu.variables?.id : null
 
   return (
     <div className="flex h-full flex-col gap-4">
@@ -305,7 +306,11 @@ export function ChannelsPage() {
                           onClick={() => testMu.mutate({ id: c.id, model: c.testModel })}
                           disabled={testMu.isPending}
                         >
-                          <Play className="h-4 w-4" />
+                          {testingChannelId === c.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Play className="h-4 w-4" />
+                          )}
                         </Button>
                         <Button
                           variant="ghost"

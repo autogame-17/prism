@@ -87,15 +87,30 @@ Then configure Prism:
 3. For Claude Pro/Max subscriptions, choose **Claude Subscription (Claude CLI)**.
    - Leave **Base URL** empty.
    - Leave the generated access label (`local-claude`) as-is.
-   - Default models: `sonnet,opus,haiku`.
+   - Default models: `sonnet,opus,haiku,claude-sonnet-4-5-20250929,claude-opus-4-1-20250805,claude-haiku-4-5-20251001`.
    - Test model: `sonnet`.
 4. Click **Create**, then use the channel test button. A successful test means the local CLI login is usable from Prism.
 5. Create a Prism token under **Tokens**, then use the normal OpenAI-compatible endpoint from Cursor / Cline / Cherry Studio.
 
+Claude subscription channels also support Prism's native Anthropic-compatible route:
+
+```bash
+curl http://127.0.0.1:39527/claude/v1/messages \
+  -H "x-api-key: $PRISM_API_KEY" \
+  -H "anthropic-version: 2023-06-01" \
+  -H "content-type: application/json" \
+  -d '{
+    "model": "sonnet",
+    "max_tokens": 128,
+    "messages": [{"role": "user", "content": "Reply with prism-ok"}]
+  }'
+```
+
 Notes:
 
-- These channels currently support text `/v1/chat/completions`.
-- Streaming is compatibility-mode: Prism waits for the CLI response, then emits OpenAI-style chunks.
+- ChatGPT subscription channels currently support text `/v1/chat/completions`.
+- Claude subscription channels support both text `/v1/chat/completions` and native text `/claude/v1/messages`.
+- Streaming is compatibility-mode: Prism waits for the CLI response, then emits OpenAI- or Anthropic-style chunks.
 - Tool calls, image input/output, embeddings and audio are not supported by the subscription bridge.
 - The bridge uses the current OS user login state. If `codex login status` or `claude auth status` fails in Terminal, the Prism channel will fail too.
 

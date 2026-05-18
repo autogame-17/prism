@@ -31,6 +31,10 @@ var (
 )
 
 func TestChannelOnce(channel *model.Channel, testModel string) (openaiErr *types.OpenAIErrorWithStatusCode, err error) {
+	return TestChannelOnceWithTimeout(channel, testModel, 0)
+}
+
+func TestChannelOnceWithTimeout(channel *model.Channel, testModel string, timeout time.Duration) (openaiErr *types.OpenAIErrorWithStatusCode, err error) {
 	if testModel == "" {
 		testModel = channel.TestModel
 		if testModel == "" {
@@ -64,6 +68,9 @@ func TestChannelOnce(channel *model.Channel, testModel string) (openaiErr *types
 	}
 	req.Header.Set("Content-Type", "application/json")
 	c.Request = req
+	if timeout > 0 {
+		c.Set("subscription_cli_timeout", timeout)
+	}
 
 	// 获取并验证provider
 	provider := providers.GetProvider(channel, c)

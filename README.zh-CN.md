@@ -89,15 +89,30 @@ claude auth status
 3. 如果要用 Claude Pro / Max 订阅，选择 **Claude Subscription (Claude CLI)**。
    - **Base URL** 留空。
    - 自动生成的 access label（`local-claude`）保持默认即可。
-   - 默认模型：`sonnet,opus,haiku`。
+   - 默认模型：`sonnet,opus,haiku,claude-sonnet-4-5-20250929,claude-opus-4-1-20250805,claude-haiku-4-5-20251001`。
    - 测试模型：`sonnet`。
 4. 点 **Create**，然后点渠道测试按钮。测试成功说明 Prism 能调用本机订阅登录。
 5. 再到 **Tokens** 创建 Prism token，Cursor / Cline / Cherry Studio 继续按普通 OpenAI-compatible endpoint 使用。
 
+Claude 订阅渠道也支持 Prism 的 Anthropic 原生兼容入口：
+
+```bash
+curl http://127.0.0.1:39527/claude/v1/messages \
+  -H "x-api-key: $PRISM_API_KEY" \
+  -H "anthropic-version: 2023-06-01" \
+  -H "content-type: application/json" \
+  -d '{
+    "model": "sonnet",
+    "max_tokens": 128,
+    "messages": [{"role": "user", "content": "只回复 prism-ok"}]
+  }'
+```
+
 注意：
 
-- 订阅桥接目前支持文本 `/v1/chat/completions`。
-- 流式响应是兼容模式：Prism 等 CLI 返回完整内容后，再包装成 OpenAI 风格 chunk。
+- ChatGPT 订阅渠道目前支持文本 `/v1/chat/completions`。
+- Claude 订阅渠道支持文本 `/v1/chat/completions` 和原生文本 `/claude/v1/messages`。
+- 流式响应是兼容模式：Prism 等 CLI 返回完整内容后，再包装成 OpenAI 或 Anthropic 风格 chunk。
 - 工具调用、图片输入输出、embedding、音频暂不支持。
 - 桥接依赖当前系统用户的登录状态。如果终端里 `codex login status` 或 `claude auth status` 失败，Prism 渠道也会失败。
 

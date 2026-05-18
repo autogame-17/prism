@@ -291,6 +291,8 @@ type TestResult struct {
 	Message      string `json:"message"`
 }
 
+const channelTestTimeout = 90 * time.Second
+
 // Test runs a live provider ping for the given channel and optional model.
 //
 // Behaviour:
@@ -314,7 +316,7 @@ func (a *ChannelsAPI) Test(id int, modelName string) (*TestResult, error) {
 	}
 
 	start := time.Now()
-	openaiErr, testErr := controller.TestChannelOnce(ch, modelName)
+	openaiErr, testErr := controller.TestChannelOnceWithTimeout(ch, modelName, channelTestTimeout)
 	elapsed := int(time.Since(start).Milliseconds())
 	ch.UpdateResponseTime(int64(elapsed))
 
