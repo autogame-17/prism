@@ -205,7 +205,7 @@ export function ChannelsPage() {
         </div>
       </div>
 
-      <Table>
+      <Table className="min-w-[980px]">
           <TableHeader>
             <TableRow>
               <TableHead className="w-12">{t('common.id')}</TableHead>
@@ -214,7 +214,9 @@ export function ChannelsPage() {
               <TableHead>{t('common.status')}</TableHead>
               <TableHead>{t('channels.col.models')}</TableHead>
               <TableHead className="text-right">{t('channels.col.priority')}</TableHead>
-              <TableHead className="text-right w-60">{t('common.actions')}</TableHead>
+              <TableHead className="sticky right-0 z-10 w-44 min-w-44 bg-card/95 text-right backdrop-blur">
+                {t('common.actions')}
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -245,8 +247,8 @@ export function ChannelsPage() {
                       {c.models || '—'}
                     </TableCell>
                     <TableCell className="text-right text-sm">{c.priority}</TableCell>
-                    <TableCell>
-                      <div className="flex justify-end gap-1">
+                    <TableCell className="sticky right-0 z-10 w-44 min-w-44 bg-card/95">
+                      <div className="flex min-w-[9.75rem] justify-end gap-1">
                         <Button
                           variant="ghost"
                           size="icon"
