@@ -76,32 +76,42 @@ func extractSessionID(req *http.Request, reqBody []byte) string {
 
 // cwdPatterns is the ordered list of regexes we try against system /
 // user message text to recover a working-directory hint. Cursor's
-// system prompt uses `Workspace Path: /xxx`; other clients (Aider,
-// Claude Code, hand-rolled scripts) use `cwd: /xxx`, `Working
-// directory: /xxx`, `<cwd>/xxx</cwd>`. We deliberately anchor on a
-// leading `/` (or drive letter on Windows) so an arbitrary mention of
-// the word "cwd" in tool output does not produce a false positive.
+// system prompt uses `Workspace Path: /xxx`; Claude Code uses
+// `Primary working directory: /xxx`; other clients (Aider,
+// hand-rolled scripts) use `cwd: /xxx`, `Working directory: /xxx`,
+// `<cwd>/xxx</cwd>`. We deliberately anchor on a leading `/` (or
+// drive letter on Windows) so an arbitrary mention of the word
+// "cwd" in tool output does not produce a false positive.
 //
 // First successful match wins. The regex must capture the path in
 // group 1.
 var cwdPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)workspace\s*path[:=]\s*([A-Za-z]:[\\/][^\s"'\n\r\\]+|/[^\s"'\n\r\\]+)`),
-	regexp.MustCompile(`(?i)current\s+working\s+directory(?:\s+is)?[:=]?\s*([A-Za-z]:[\\/][^\s"'\n\r\\]+|/[^\s"'\n\r\\]+)`),
+	regexp.MustCompile(`(?i)(?:current|primary)\s+working\s+directory(?:\s+is)?[:=]?\s*([A-Za-z]:[\\/][^\s"'\n\r\\]+|/[^\s"'\n\r\\]+)`),
 	regexp.MustCompile(`(?i)working\s+directory[:=]\s*([A-Za-z]:[\\/][^\s"'\n\r\\]+|/[^\s"'\n\r\\]+)`),
 	regexp.MustCompile(`(?i)\bcwd[:=]\s*([A-Za-z]:[\\/][^\s"'\n\r\\]+|/[^\s"'\n\r\\]+)`),
 	regexp.MustCompile(`<cwd>\s*([A-Za-z]:[\\/][^\s<\n\r]+|/[^\s<\n\r]+)\s*</cwd>`),
 }
 
-// extractCWD walks the chat-completion-style messages array and runs
-// cwdPatterns against the text content of system / user messages. We
-// intentionally skip assistant + tool messages: the model may echo a
-// path that does not belong to the client's workspace, and tool output
-// often contains unrelated paths. If the request is not a recognised
-// messages shape (e.g. /v1/embeddings) the function returns "" without
+// extractCWD scans the request body for a working-directory hint in
+// the two places clients put it: Anthropic's top-level `system` field
+// (string OR structured-array form), and the chat-style `messages`
+// array. We intentionally skip assistant + tool messages: the model
+// may echo a path that does not belong to the client's workspace, and
+// tool output often contains unrelated paths. If neither shape is
+// recognised (e.g. /v1/embeddings) the function returns "" without
 // scanning anything.
+//
+// The system field wins over messages because Claude Code embeds
+// `Primary working directory: /xxx` there exclusively; without this
+// branch ~93% of Claude Code traces landed with empty cwd even though
+// the path was right in the request.
 func extractCWD(reqBody []byte) string {
 	if len(reqBody) == 0 {
 		return ""
+	}
+	if hint := matchCWDPatterns(contentToText(gjson.GetBytes(reqBody, "system"))); hint != "" {
+		return hint
 	}
 	messages := gjson.GetBytes(reqBody, "messages")
 	if !messages.IsArray() {
@@ -113,20 +123,29 @@ func extractCWD(reqBody []byte) string {
 		if role != "system" && role != "user" && role != "developer" {
 			return true
 		}
-		content := msg.Get("content")
-		text := contentToText(content)
-		if text == "" {
-			return true
-		}
-		for _, re := range cwdPatterns {
-			if m := re.FindStringSubmatch(text); len(m) >= 2 {
-				found = truncate(strings.TrimSpace(m[1]), maxCWDLen)
-				return false
-			}
+		text := contentToText(msg.Get("content"))
+		if hint := matchCWDPatterns(text); hint != "" {
+			found = hint
+			return false
 		}
 		return true
 	})
 	return found
+}
+
+// matchCWDPatterns runs the cwdPatterns regexes over a piece of text
+// in declaration order and returns the first capture (truncated to
+// the column width). Empty string when nothing matches.
+func matchCWDPatterns(text string) string {
+	if text == "" {
+		return ""
+	}
+	for _, re := range cwdPatterns {
+		if m := re.FindStringSubmatch(text); len(m) >= 2 {
+			return truncate(strings.TrimSpace(m[1]), maxCWDLen)
+		}
+	}
+	return ""
 }
 
 // contentToText flattens both legacy (string) and structured-array
