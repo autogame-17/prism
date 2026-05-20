@@ -47,6 +47,8 @@ func Path2Relay(c *gin.Context, path string) RelayBaseInterface {
 		relay = NewRelayTranscriptions(c)
 	} else if strings.HasPrefix(path, "/v1/audio/translations") {
 		relay = NewRelayTranslations(c)
+	} else if strings.HasPrefix(path, "/v1/messages") {
+		relay = NewRelayClaudeOnly(c)
 	} else if strings.HasPrefix(path, "/claude") {
 		relay = NewRelayClaudeOnly(c)
 	} else if strings.HasPrefix(path, "/gemini") {
@@ -576,7 +578,7 @@ func FilterOpenAIErr(c *gin.Context, err *types.OpenAIErrorWithStatusCode) (errW
 
 	if !newErr.LocalError && newErr.OpenAIError.Type == "one_hub_error" || strings.HasSuffix(newErr.OpenAIError.Type, "_api_error") {
 		newErr.OpenAIError.Type = "system_error"
-		if utils.ContainsString(newErr.Message, quotaKeywords) {
+		if newErr.StatusCode != http.StatusPaymentRequired && utils.ContainsString(newErr.Message, quotaKeywords) {
 			newErr.Message = "上游负载已饱和，请稍后再试"
 			newErr.StatusCode = http.StatusTooManyRequests
 		}
