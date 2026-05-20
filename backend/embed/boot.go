@@ -334,6 +334,12 @@ memory_cache_enabled: false
 # "127.0.0.1:0" if you want a random ephemeral port instead.
 listen_addr: "127.0.0.1:39527"
 
+# Prism's root /v1 endpoint protocol. "openai" keeps /v1/chat/completions
+# as the primary API. "anthropic" also exposes Anthropic Messages at
+# /v1/messages so Claude Code can use ANTHROPIC_BASE_URL=http://host:port.
+protocol:
+  default: "openai"
+
 global:
   api_rate_limit: 1800
   web_rate_limit: 1000

@@ -9,6 +9,7 @@ import (
 	"one-api/relay/task/suno"
 
 	"github.com/gin-gonic/gin"
+	"github.com/spf13/viper"
 )
 
 func SetRelayRouter(router *gin.Engine) {
@@ -63,6 +64,22 @@ func setOpenAIRouter(router *gin.Engine) {
 			relayV1Router.DELETE("/models/:model", relay.RelayOnly)
 		}
 	}
+
+	if defaultProtocol() == "anthropic" {
+		anthropicV1Router := router.Group("/v1")
+		anthropicV1Router.Use(middleware.APIEnabled("claude"), middleware.RelayCluadePanicRecover(), middleware.ClaudeAuth(), middleware.Distribute(), middleware.DynamicRedisRateLimiter())
+		{
+			anthropicV1Router.POST("/messages", relay.Relay)
+		}
+	}
+}
+
+func defaultProtocol() string {
+	protocol := viper.GetString("protocol.default")
+	if protocol == "" {
+		protocol = viper.GetString("relay.default_protocol")
+	}
+	return protocol
 }
 
 func setMJRouter(router *gin.Engine) {
